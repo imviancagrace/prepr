@@ -1,0 +1,34 @@
+name: prepr-debate-reviewer
+description: Continue both original reviewer sessions through bounded, attributed debate rounds for one Prepr dispute.
+inputs:
+  cache_path:
+    default: ""
+    description: Parent-run artifact path for serial duplicate-discussion reuse.
+  run_id:
+    default: ""
+    description: Parent workflow run ID; reuse never crosses runs.
+  reviewer_a:
+    default: ""
+    description: Serialized selected reviewer skill for side A.
+  reviewer_b:
+    default: ""
+    description: Serialized selected reviewer skill for side B.
+  review_a:
+    default: ""
+    description: Original reviewer A result, including its session ID.
+  review_b:
+    default: ""
+    description: Original reviewer B result, including its session ID.
+  dispute:
+    default: "[]"
+    description: The normalized disagreement to reconsider.
+  findings:
+    default: "[]"
+    description: Initial findings used to identify possible duplicate concerns during debate.
+returns: debate
+mutates_checkout: false
+nodes:
+  - id: debate
+    script: run-debate-rounds
+    runtime: bun
+    timeout: 600000

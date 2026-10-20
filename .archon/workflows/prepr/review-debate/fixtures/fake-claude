@@ -1,0 +1,9 @@
+#!/bin/sh
+case "$*" in
+  *--resume*)
+    printf '%s\n' '{"type":"result","session_id":"00000000-0000-0000-0000-000000000002","result":"{\"stance\":\"accept\",\"verdict\":\"issue\",\"rationale\":\"The evidence establishes the missing guard.\",\"confidence\":\"high\"}"}'
+    ;;
+  *)
+    printf '%s\n' '{"type":"result","session_id":"00000000-0000-0000-0000-000000000002","result":"{\"findings\":[]}"}'
+    ;;
+esac

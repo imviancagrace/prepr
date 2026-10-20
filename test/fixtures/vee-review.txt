@@ -1,0 +1,11 @@
+I’ll use the specified reviewer skill and inspect the diff.
+Review scope: Uncommitted changes including a.ts.
+Vee questions:
+1. a.ts:12
+Private rationale: Missing null check lets anonymous requests crash.
+Proposed question: Should anonymous requests be rejected here before accessing the user?
+Vee verdict: Needs changes. Current spec alignment is 100%.
+Default review:
+1. High: a.ts:12 — Missing null check lets anonymous requests crash.
+Static workflow validation and git diff --check passed. No files were modified.
+Clean-context subagent used.

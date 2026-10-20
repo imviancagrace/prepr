@@ -1,0 +1,12 @@
+#!/bin/sh
+case "$*" in
+  *"debate round 2"*)
+    printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"stance\":\"accept\",\"verdict\":\"no_issue\",\"rationale\":\"I verified that the router applies the existing guard before this endpoint runs.\"}"}}'
+    ;;
+  *resume*)
+    printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"stance\":\"revise\",\"verdict\":\"issue\",\"rationale\":\"I thought anonymous requests could reach the user access without a guard.\"}"}}'
+    ;;
+  *)
+    printf '%s\n' '{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000011"}' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"findings\":[{\"summary\":\"a.ts:1 missing guard\",\"file\":\"a.ts\",\"line\":1,\"title\":\"Anonymous request guard\",\"evidence\":\"The endpoint accesses user.id without a local guard.\",\"severity\":\"high\",\"verdict\":\"issue\"}]}"}}'
+    ;;
+esac

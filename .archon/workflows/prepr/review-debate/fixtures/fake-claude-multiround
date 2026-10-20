@@ -1,0 +1,16 @@
+#!/bin/sh
+case " $* " in
+  *" --verbose "*) ;;
+  *) echo 'stream-json requires --verbose' >&2; exit 1 ;;
+esac
+case "$*" in
+  *"debate round 2"*)
+    printf '%s\n' '{"type":"result","session_id":"00000000-0000-0000-0000-000000000012","result":"{\"stance\":\"accept\",\"verdict\":\"no_issue\",\"rationale\":\"The route is protected by the shared guard; a second local guard is unnecessary.\"}"}'
+    ;;
+  *--resume*)
+    printf '%s\n' '{"type":"result","session_id":"00000000-0000-0000-0000-000000000012","result":"{\"stance\":\"maintain\",\"verdict\":\"no_issue\",\"rationale\":\"The router applies the shared authentication guard to this endpoint.\"}"}'
+    ;;
+  *)
+    printf '%s\n' '{"type":"result","session_id":"00000000-0000-0000-0000-000000000012","result":"{\"findings\":[{\"summary\":\"a.ts:1 missing guard\",\"file\":\"a.ts\",\"line\":1,\"title\":\"Anonymous request guard\",\"evidence\":\"The route is protected by the shared router guard.\",\"severity\":\"low\",\"verdict\":\"no_issue\"}]}"}'
+    ;;
+esac

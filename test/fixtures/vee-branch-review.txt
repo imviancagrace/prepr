@@ -1,0 +1,31 @@
+I’ll review the pinned Git objects and surrounding code without changing the checkout or files, then report findings in the reviewer skill’s format.
+The checkout is clean at the requested SHA. The diff is broad, so I’m identifying the active spec and tracing the date filter path first. A remote freshness check could not run in this environment; I’ll keep the pinned scope and report that limit.
+I found a UTC boundary issue: Created date is displayed and filtered by UTC day, but the editor caps selections at the viewer’s local today. Around UTC midnight, that can prevent selecting a date shown in the table. I’m checking baseline behavior and the independent review before finalizing the findings.
+## Review scope
+
+Reviewed the committed local branch `vm.date-filtering-logic` at `11275937daf425c0b5f00508838a641b5638ad4d` against `origin/main` at `c8581bc24bab2409586f2ac8dfc023e2875b64ed`. The common starting point is `c8581bc`. The checkout was clean; no local work was excluded or files changed. A final remote freshness check failed because GitHub could not be resolved, so this report remains tied to the pinned snapshot rather than a claim about newer refs.
+
+## Vee questions
+
+1. [Created date filter:124](/review-repo/symmetry-tax-filing-ui/src/app/taxes/ui/taxes-v3-filter-bar/taxes-v3-filter-bar.component.ts:124)  
+   **Question:** How can someone select a record’s displayed UTC Created date when that date is already tomorrow in their local timezone?  
+   **Private rationale:** The editor caps dates at local today, then clamps a later selection, while the table displays the UTC day. The spec explicitly requires a `2026-10-12T00:30:00Z` record to match October 12 even where the viewer is still on October 11. A focused timezone reproduction confirms the dates diverge. **Origin:** branch introduced this Created date control; the equivalent workflow was absent at the starting point. **Current `origin/main` baseline (`c8581bc`):** absent.
+
+2. [Export filters:456](/review-repo/symmetry-tax-filing-ui/src/app/taxes/data/taxes-container/taxes-container.component.ts:456)  
+   **Question:** Why does Export receive only state and search when the table can also have STE release or Effective date applied?  
+   **Private rationale:** Preview and download can contain more records than the filtered table. The starting point forwarded STE release and effective date bounds, and the export contract still supports them. **Origin:** regression introduced by this branch. **Current `origin/main` baseline (`c8581bc`):** absent.
+
+3. [Export columns:451](/review-repo/symmetry-tax-filing-ui/src/app/taxes/data/taxes-container/taxes-container.component.ts:451)  
+   **Question:** Should a saved supplemental column selection disappear from the export just because no row on the current page uses it?  
+   **Private rationale:** `visibleColumnIdsForTable()` hides those columns based on the current page, while Export covers other pages too. The starting point used the full saved selection. **Origin:** regression introduced by this branch. **Current `origin/main` baseline (`c8581bc`):** absent.
+
+## Vee verdict
+
+The publication timestamp mapping and outgoing `published_from`/`published_to` translation align with the active spec, but the UTC boundary case does not. **Scoped alignment: 80% (4 of 5 active publication-date requirement groups)**, based on code and focused checks; the outstanding live Picnic integration task remains unverified. Spec set: `openspec/specs/unified-auto-all-rates-prototype/spec.md` as modified by `openspec/changes/use-publication-date-for-created-date/specs/unified-auto-all-rates-prototype/spec.md`.
+
+## Default review
+
+An independent clean-context subagent found:
+
+- **P1:** Export drops supported STE release and Effective date filters, producing a broader file than the displayed results. This overlaps Vee question 2.
+- **P2:** [All-rates navigation:163](/review-repo/symmetry-tax-filing-ui/src/app/taxes/data/taxes-container/taxes-container.component.ts:163) omits the record ID. Two versions of the same tax with the same effective date get the same route, and the detail view selects the first rate with that date. The date-only lookup existed at the baseline; this branch’s individual-record table exposes that limitation.

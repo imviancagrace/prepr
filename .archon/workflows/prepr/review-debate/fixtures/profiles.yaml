@@ -1,0 +1,13 @@
+default_pair:
+  reviewer_a: fixture-a
+  reviewer_b: fixture-b
+reviewers:
+  fixture-a:
+    name: Fixture A
+    launcher: codex
+    model: gpt-5.6-sol
+    skill: .archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill
+  fixture-b:
+    name: Fixture B
+    launcher: claude
+    skill: .archon/workflows/prepr/review-debate/fixtures/reviewer-b-skill

@@ -1,0 +1,37 @@
+I’ll review the pinned commit against the pinned base, then check the affected code and specs at that revision. I’ll keep the review read only and use the requested reviewer format.
+The pinned HEAD and base match the supplied SHAs. The branch diff spans several merged features, so I’m tracing the final Taxes filter flow end to end and checking it against the committed specs.
+I found two paths that need closer checking: the Created date editor’s maximum date near UTC midnight, and the enabled Export action when advanced conditions are active. I’m comparing both with the base behavior and the export request contract before reporting them.
+{
+  "overview": "The pinned branch aligns Created date display and API bounds with publication time. Three actionable issues remain in the date editor and Export flow.",
+  "verification": "Reviewed the pinned diff and surrounding code and specs without changing files. `git diff --check` passed. I did not run tests or a browser check; the committed implementation notes describe earlier checks, but those were not repeated for this review.",
+  "findings": [
+    {
+      "summary": "Created date cannot select the current UTC day in timezones behind UTC.",
+      "evidence": "The maximum is built from the viewer’s local date, while the column and filter use the publication timestamp’s UTC date. For example, at 5:30 p.m. Pacific on October 11, a record published at 2026-10-12T00:30:00Z displays October 12, but the editor caps a selected date at October 11. Use the current UTC calendar day for this limit.",
+      "file": "symmetry-tax-filing-ui/src/app/taxes/ui/taxes-v3-filter-bar/taxes-v3-filter-bar.component.ts",
+      "line": 124,
+      "severity": "Must fix",
+      "verdict": "issue"
+    },
+    {
+      "summary": "Export drops active date and STE release filters.",
+      "evidence": "The list request applies Effective date, Created date, and STE release criteria, but exportFilters sends only state and search. The base branch exported Effective date and STE release bounds. With either condition active, Export previews and downloads a broader set than the table while the dialog says it uses the selected filters. Align the export request with supported conditions, and prevent or clearly distinguish exports for conditions the export API cannot apply.",
+      "file": "symmetry-tax-filing-ui/src/app/taxes/data/taxes-container/taxes-container.component.ts",
+      "line": 456,
+      "severity": "Must fix",
+      "verdict": "issue"
+    },
+    {
+      "summary": "Export omits selected supplemental columns based on the current page.",
+      "evidence": "exportColumnIds now uses visibleColumnIdsForTable, which hides supplemental columns when the current page has no applicable tax. An export covers all pages, so later rows can need columns the user selected. The base branch deliberately exported the untrimmed visibleColumnIds. Use the saved selection for the export.",
+      "file": "symmetry-tax-filing-ui/src/app/taxes/data/taxes-container/taxes-container.component.ts",
+      "line": 451,
+      "severity": "Must fix",
+      "verdict": "issue"
+    }
+  ],
+  "checked": [
+    "Created date requests use published_from and published_to while browser links retain act_from and act_to.",
+    "Response parsing keeps publication time separate from modification time and leaves a missing publication time null."
+  ]
+}

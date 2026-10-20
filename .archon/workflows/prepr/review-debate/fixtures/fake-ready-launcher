@@ -1,0 +1,39 @@
+#!/usr/bin/env bun
+import { appendFileSync } from 'node:fs';
+const prompt = process.argv.find(arg => arg.startsWith('PREPR_READINESS:') || arg.startsWith('You are one side') || arg.startsWith('Continue the same')) || process.argv.at(-1) || '';
+const log = process.env.PREPR_TEST_LOG;
+const probe = prompt.startsWith('PREPR_READINESS:');
+if (log) appendFileSync(log, JSON.stringify({probe,args:process.argv.slice(2)})+'\n');
+if (process.env.PREPR_TEST_DELAY) await Bun.sleep(Number(process.env.PREPR_TEST_DELAY));
+const output = (text) => {
+ if (process.argv.includes('--json')) {
+  console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session'}));
+  console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text}}));
+ } else console.log(JSON.stringify({type:'result',session_id:'fixture-session',result:text}));
+};
+if (probe) {
+ if (process.env.PREPR_TEST_FAIL) { console.error('Authentication expired or selected model unavailable.'); process.exit(1); }
+ const match = prompt.match(/perform one read each: (\[.*?\])\. file means/);
+ const access = JSON.parse(match?.[1] || '[]');
+ if (!process.env.PREPR_TEST_DENY && !process.env.PREPR_TEST_UNPROVEN) for (const item of access) {
+  const command = item.tool==='gh' ? `gh api --method GET ${item.resource}` : item.tool==='git' ? `git ls-remote ${item.resource} HEAD` : `cat ${item.resource}`;
+  if (process.argv.includes('--json')) console.log(JSON.stringify({type:'item.completed',item:{type:'command_execution',command,exit_code:0}}));
+  else {
+   console.log(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'read',name:item.tool==='file'?'Read':'Bash',input:item.tool==='file'?{file_path:item.resource}:{command}}]}}));
+   console.log(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'read',content:'readable',is_error:false}]}}));
+  }
+ }
+ output(JSON.stringify({ready:!process.env.PREPR_TEST_DENY,reason:process.env.PREPR_TEST_DENY?'Sandbox denied required resource':undefined,access:access.map(item=>({...item,status:process.env.PREPR_TEST_DENY?'unverifiable':'verified'}))}));
+} else if (process.env.PREPR_TEST_REVIEW_FAIL) { console.error('Access expired after preflight'); process.exit(1); }
+else if (process.env.PREPR_TEST_ACCEPTANCE) {
+ if (process.argv.includes('resume') || process.argv.includes('--resume')) {
+  const source=prompt.match(/attributed finding: (\[.*?\])\. The other/);
+  const current=JSON.parse(source?.[1] || '[]').map(f=>f.id);
+  const candidates=prompt.match(/different failures: (\[.*?\])\. Also return/);
+  const ids=JSON.parse(candidates?.[1] || '[]').map(f=>f.id).filter(id=>!current.includes(id));
+  output(JSON.stringify({stance:'accept',verdict:'issue',rationale:'Anonymous requests crash if the user is missing. Duplicate-date data remains unverified.',sameConcernAs:ids}));
+ } else {
+  const a=prompt.includes('reviewer-a-skill');
+  output(JSON.stringify({findings:[{summary:a?'missing request guard':'anonymous request crashes',file:'a.ts',line:1,severity:a?'P1':'Must fix',verdict:'issue',evidence:'Anonymous requests crash if the user is missing. Duplicate-date data remains unverified.'}],verification:[{name:'Tests',status:'not run',evidence:'Controlled fixture; no project tests executed.'}]}));
+ }
+} else output('{"findings":[],"verification":"Tests not run; fixture review only."}');

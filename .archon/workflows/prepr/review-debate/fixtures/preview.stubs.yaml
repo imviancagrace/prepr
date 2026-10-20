@@ -1,0 +1,20 @@
+fixture:
+  expect: completed
+  inputs:
+    preview_only: "true"
+    reviewer_a: unavailable
+    reviewer_b: unavailable
+capture-diff:
+  scope:
+    mode: local
+    targetSha: fixture
+  previewOnly: true
+  debateCachePath: ""
+  runId: fixture
+  changed: true
+  preview:
+    mode: local
+    changedFileCount: 1
+    diffBytes: 20
+report:
+  preview: {mode: local, changedFileCount: 1, diffBytes: 20}

@@ -1,0 +1,13 @@
+#!/bin/sh
+if [ "$2" = "--json" ]; then
+  case "$*" in
+    *reviewer-a-skill*)
+      printf '%s\n' '{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000001"}' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"findings\":[{\"summary\":\"a.ts:1 missing guard\",\"file\":\"a.ts\",\"line\":1}]}"}}'
+      ;;
+    *)
+      printf '%s\n' '{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000002"}' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"findings\":[]}"}}'
+      ;;
+  esac
+else
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"verdict\":\"issue\",\"confidence\":\"high\"}"}}'
+fi

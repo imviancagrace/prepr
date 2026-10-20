@@ -1,0 +1,48 @@
+fixture:
+  expect: cancelled
+  inputs:
+    reviewer_a: "fixture-a"
+    reviewer_b: "fixture-b"
+select-reviewers:
+  readinessPath: ""
+  readiness:
+    a: {status: ready}
+    b: {status: ready}
+  reviewerA:
+    name: "fixture-a"
+    reference: "fixture-a"
+    skillPath: "/tmp/fixture-a/SKILL.md"
+    launcher: "codex"
+  reviewerB:
+    name: "fixture-b"
+    reference: "fixture-b"
+    skillPath: "/tmp/fixture-b/SKILL.md"
+    launcher: "claude"
+capture-diff:
+  previewOnly: false
+  debateCachePath: ""
+  runId: fixture
+  scope: null
+  diff: "diff --git a/a.ts b/a.ts"
+  changed: true
+initial-reviewer-a:
+  reviewer: "fixture-a"
+  phase: "initial"
+  status: "completed"
+  stdout: '{"findings":[{"summary":"a.ts:1 missing guard","file":"a.ts","line":1}]}'
+  stderr: ""
+  exitCode: 0
+  sessionId: "00000000-0000-0000-0000-000000000001"
+initial-reviewer-b:
+  reviewer: "fixture-b"
+  phase: "initial"
+  status: "completed"
+  stdout: '{"findings":[]}'
+  stderr: ""
+  exitCode: 0
+  sessionId: "00000000-0000-0000-0000-000000000002"
+comparison:
+  ready: false
+  agreements: []
+  disputes: []
+  findings: []
