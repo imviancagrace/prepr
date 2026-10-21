@@ -6,6 +6,30 @@ Prepr is an Archon workflow package for a private, pre-PR discussion between two
 
 Copy `.archon/workflows/prepr/` into the repository you want to review. Archon 0.11.1+, Bun, and the selected launcher CLI (Codex or Claude Code) must be available. Run from the checkout you want reviewed. Uncommitted work is the default; committed branch review must be selected explicitly.
 
+## Guided setup skill
+
+The portable [`prepr-setup`](skills/prepr-setup/SKILL.md) skill prepares a project without starting a review. It fetches `main` from `https://github.com/imviancagrace/prepr.git`, records the fetched commit, asks before installing missing prerequisites, and lets you choose two reviewers. This repository is currently private, so Git access is required.
+
+Install the entire `skills/prepr-setup/` folder, including scripts and references, into your host's skill directory. For example, after cloning the remote:
+
+```sh
+git clone --branch main --single-branch https://github.com/imviancagrace/prepr.git /path/to/prepr
+# Codex: user-level skills
+mkdir -p ~/.agents/skills
+cp -R /path/to/prepr/skills/prepr-setup ~/.agents/skills/
+# Claude Code: use this alternative destination
+mkdir -p ~/.claude/skills
+cp -R /path/to/prepr/skills/prepr-setup ~/.claude/skills/
+```
+
+Choose the destination for your host; avoid overwriting an existing skill without inspecting it. The documented locations follow the [Codex skills documentation](https://developers.openai.com/codex/skills/) and [Claude Code skills documentation](https://code.claude.com/docs/en/skills/). Invoke `$prepr-setup` in Codex or `/prepr-setup` in Claude Code from the target project. A local skill-folder install does not publish or register a marketplace plugin.
+
+On repeat runs, setup asks whether to keep your reviewer configuration or configure a new pair. Differing workflow files receive a separate keep/replace choice, and replacements retain local recovery backups. It preserves unrelated workflows and profiles. Machine-specific profile/provenance/backup state is excluded locally from new Git tracking; an already tracked profile requires your remediation decision.
+
+Setup validates files, versions, skill references, and model configuration without launching reviewer/model sessions. Actual authentication, model entitlement, and reviewer sandbox/resource readiness remain checks for a later normal run. It finishes by showing local, branch, and preview commands for you to run manually. It never invokes those commands, including preview-only, automatically.
+
+The helper requires the setup-compatible profile validator shipped with this version of Prepr; publish this version to remote `main` before distributing the skill. It fails clearly if fetched main predates that support. POSIX helper/bootstrap flows are provided for macOS, Linux, and WSL; native Windows users should follow the skill's documented WSL/manual path rather than run shell commands in PowerShell. Installation methods and acceptance limits are in the skill's [prerequisite reference](skills/prepr-setup/references/prerequisites.md).
+
 ## Configure reviewer profiles
 
 Profiles are local-only and ignored by Git. Create `.archon/prepr.local.yaml` in the checkout:

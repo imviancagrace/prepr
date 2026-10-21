@@ -28,8 +28,8 @@ const launcher = (value: string, side: string): Launcher => {
   if (value === "codex" || value === "claude") return value;
   throw new Error(`${side} must select launcher codex or claude.`);
 };
-function chooseReferences(selectedA: string, selectedB: string, launcherA: string, launcherB: string, modelA: string, modelB: string) {
-  const config = readProfiles(), pair = config.default_pair;
+export function chooseReferences(selectedA: string, selectedB: string, launcherA: string, launcherB: string, modelA: string, modelB: string, config: ProfileFile = readProfiles()) {
+  const pair = config.default_pair;
   const resolveSelection = (selection: string, directLauncher: string, directModel: string, side: "reviewer_a" | "reviewer_b") => {
     const value = selection || pair?.[side];
     if (!value) throw new Error("Choose two reviewers with --input reviewer_a=... and --input reviewer_b=..., or configure default_pair in .archon/prepr.local.yaml.");
