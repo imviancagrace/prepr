@@ -75,11 +75,23 @@ export function validatePackage(root: string) {
 export function plan(project: string, source: string, exec: Run = run) {
   const root = projectRoot(project,exec), info = sourceInfo(source,exec);
   const wanted = files(join(source,workflow)), current = files(safePath(root,workflow));
-  const peerCurrent = files(safePath(root,'.archon/prepr-reviewers/peer-review-guidelines'));
+  const peerCurrent = files(safePath(root,`.archon/prepr-reviewers/sources/${info.commit}/peer-review-guidelines`));
   const peerWanted = files(join(source,'reviewers/peer-review-guidelines'));
   const peerChanged = [...new Set([...Object.keys(peerCurrent),...Object.keys(peerWanted)])].filter(p => peerCurrent[p] !== peerWanted[p]);
   const changed = [...new Set([...Object.keys(wanted),...Object.keys(current)])].filter(p => wanted[p] !== current[p]);
   return { root, source:info, peerCurrent, peerChanged, workflowExists: existsSync(join(root,workflow)), changed, configExists: existsSync(safePath(root,profile)), configHash: existsSync(join(root,profile)) ? hash(read(join(root,profile))) : null, current };
+}
+export function stageBundled(project:string,source:string,exec:Run=run) {
+  const root=projectRoot(project,exec), info=sourceInfo(source,exec);
+  const rel=`.archon/prepr-reviewers/sources/${info.commit}/peer-review-guidelines`, target=safePath(root,rel), origin=join(source,'reviewers/peer-review-guidelines');
+  const expected=files(origin), actual=files(target);
+  if(Object.keys(actual).length && JSON.stringify(expected)!==JSON.stringify(actual)) throw new Error('Versioned bundled source was modified; preserve it and select an explicit local source.');
+  const exclude=resolve(root,exec(['git','rev-parse','--git-path','info/exclude'],root));
+  if(exec(['git','ls-files','--','.archon/prepr-reviewers/sources'],root)) throw new Error('Local reviewer source storage is tracked; remediate explicitly.');
+  const old=existsSync(exclude)?read(exclude):'';
+  if(!old.split('\n').includes('/.archon/prepr-reviewers/sources/')) {mkdirSync(dirname(exclude),{recursive:true});writeFileSync(exclude,old+(old&&!old.endsWith('\n')?'\n':'')+'/.archon/prepr-reviewers/sources/\n');}
+  if(!Object.keys(actual).length) {mkdirSync(dirname(target),{recursive:true});cpSync(origin,target,{recursive:true});}
+  return {source:target,revision:info.commit,status:'inactive-source',note:'Prepare and obtain human acceptance before activation.'};
 }
 export type Tool = { tool: string; status: 'present'|'missing-or-incompatible'; version?: string };
 export function inspectTools(launchers: string[], exec: Run = run): Tool[] {
@@ -121,7 +133,7 @@ async function skillExists(reference: string, root: string, exec: Run) {
     if (!existsSync(skill) || !statSync(skill).isFile() || !read(skill).trim()) throw new Error(`Missing reviewer SKILL.md: ${reference}`);
   }
 }
-export async function validateConfig(config: any, root: string, packageRoot: string, exec: Run = run, bundledSource?: string) {
+export async function validateConfig(config: any, root: string, packageRoot: string, exec: Run = run, bundledSource?: string, pending: any[] = []) {
   if (!config || typeof config !== 'object' || !config.reviewers || !config.default_pair) throw new Error('Profiles require reviewers and default_pair.');
   const core = await import(pathToFileURL(join(packageRoot,'.shared/core.ts')).href);
   if (typeof core.chooseReferences !== 'function') throw new Error('Remote main predates setup validation support. Publish the setup-compatible Prepr version to main and fetch again.');
@@ -140,9 +152,12 @@ export async function validateConfig(config: any, root: string, packageRoot: str
     const effective = tiers.tiers?.find((t: any) => t.tier === 'large')?.effective;
     if (effective?.provider !== reviewer.launcher || !effective.model) throw new Error(`Pin a compatible ${reviewer.launcher} model or configure its matching Archon large tier yourself.`);
   }
+  const onboarding = await import(pathToFileURL(join(packageRoot,'.shared/reviewers.ts')).href);
+  const accepted = [reviewerA,reviewerB].map(reviewer => onboarding.resolveAccepted(reviewer.reference === 'bundled:peer' ? bundledSource! : reviewer.reference,root,exec,pending));
   const launchers = [reviewerA.launcher,reviewerB.launcher];
   const tools = inspectTools(launchers,exec);
-  for (const p of [config.reviewers[config.default_pair.reviewer_a],config.reviewers[config.default_pair.reviewer_b]]) for (const access of p.required_access ?? []) {
+  const declared = [...(config.reviewers[config.default_pair.reviewer_a].required_access ?? []),...(config.reviewers[config.default_pair.reviewer_b].required_access ?? []),...accepted.flatMap(r=>r.requiredAccess)];
+  for (const access of declared) {
     if (!['file','git','gh'].includes(access.tool)) throw new Error(`Unsupported required tool: ${access.tool}`);
     if (access.tool === 'gh' && !tools.some(t => t.tool === 'gh')) {
       try { tools.push({tool:'gh',status:'present',version:exec(['gh','--version'])}); }
@@ -151,10 +166,10 @@ export async function validateConfig(config: any, root: string, packageRoot: str
   }
   const missing = tools.filter(t => t.status !== 'present');
   if (missing.length) throw new Error(`Missing/incompatible prerequisites: ${missing.map(t=>t.tool).join(', ')}. Obtain permission before installing.`);
-  return { tools, unverified };
+  return { tools, unverified, reviewers: accepted.map(r=>r.reviewerPackage) };
 }
 
-type Request = { project: string; source: string; workflow: 'keep'|'replace'; config: 'keep'|'new'; configFile?: string; expectedConfigHash: string|null; expectedWorkflow: Record<string,string>; peer?: 'keep'|'replace'; expectedPeer?: Record<string,string> };
+type Request = { project: string; source: string; workflow: 'keep'|'replace'; config: 'keep'|'new'; configFile?: string; expectedConfigHash: string|null; expectedWorkflow: Record<string,string>; peer?: 'keep'|'replace'; expectedPeer?: Record<string,string>; acceptances?: {id:string;digest:string;decision:'accept'}[] };
 export async function apply(request: Request, exec: Run = run, replace = renameSync) {
   const p = plan(request.project,request.source,exec), root = p.root;
   if (!['keep','replace'].includes(request.workflow) || !['keep','new'].includes(request.config)) throw new Error('Explicit workflow and configuration choices required.');
@@ -171,14 +186,19 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
     if (!incoming?.default_pair || !incoming?.reviewers) throw new Error('New configuration requires a complete pair and reviewers.');
     config = {...oldConfig,...incoming,reviewers:{...oldConfig?.reviewers,...incoming?.reviewers}};
   }
-  const peerRel = '.archon/prepr-reviewers/peer-review-guidelines', peerSource = join(request.source,'reviewers/peer-review-guidelines');
+  const peerRel = `.archon/prepr-reviewers/sources/${p.source.commit}/peer-review-guidelines`, peerSource = join(request.source,'reviewers/peer-review-guidelines');
   const usesBundled = Object.values(config.reviewers ?? {}).some((v: any) => v?.skill === 'bundled:peer');
   const selectedPackage = request.workflow === 'keep' ? join(root,workflow) : join(request.source,workflow);
   validatePackage(selectedPackage);
   if (request.config === 'keep' && usesBundled) throw new Error('Existing configuration contains a setup placeholder; choose new configuration to materialize it.');
   if (usesBundled && Object.keys(p.peerCurrent).length && p.peerChanged.length && (!['keep','replace'].includes(request.peer ?? '') || JSON.stringify(request.expectedPeer) !== JSON.stringify(p.peerCurrent))) throw new Error('Bundled peer differs: show changes and obtain an explicit keep/replace choice with expectedPeer.');
   const retainedPeer = usesBundled && request.peer === 'keep' && Object.keys(p.peerCurrent).length > 0;
-  const validation = await validateConfig(config,root,join(request.source,workflow),exec,retainedPeer ? join(root,peerRel) : peerSource);
+  const onboarding = await import(pathToFileURL(join(request.source,workflow,'.shared/reviewers.ts')).href);
+  if((request.acceptances ?? []).some(a=>a.decision!=='accept')) throw new Error('Reviewer acceptance declined or incomplete; prior configuration remains active.');
+  const pending = (request.acceptances ?? []).map(a => onboarding.acceptedCandidate(root,a.id,a.digest,a.decision,exec)).filter(Boolean);
+  if(usesBundled && !existsSync(join(root,peerRel))) throw new Error('Stage the versioned bundled source and prepare/accept its preview before applying setup.');
+  const validation = await validateConfig(config,root,join(request.source,workflow),exec,join(root,peerRel),pending);
+  const registryPlan = pending.length ? onboarding.activationPlan(root,pending,exec) : null;
   const latest = plan(root,request.source,exec);
   if (latest.configHash !== p.configHash || JSON.stringify(latest.current) !== JSON.stringify(p.current) || JSON.stringify(latest.peerCurrent) !== JSON.stringify(p.peerCurrent)) throw new Error('Project changed during validation; inspect and ask again.');
   const stagedConfig = structuredClone(config);
@@ -199,12 +219,14 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
   };
   if (request.workflow === 'replace' && p.changed.length) prepare(workflow,join(request.source,workflow));
   if (usesBundled && !retainedPeer && p.peerChanged.length) prepare(peerRel,peerSource);
+  for(const item of pending) if(!existsSync(item.target)) prepare(relative(root,item.target),item.package);
+  if(registryPlan) prepare(relative(root,registryPlan.path),undefined,JSON.stringify(registryPlan.registry,null,2)+'\n');
   if (request.config === 'new') prepare(profile,undefined,Bun.YAML.stringify(stagedConfig));
   const record = { source:installedSource, files:actualFiles, peer: usesBundled ? {path:peerRel,source:retainedPeer ? (JSON.stringify(previous?.peer?.files) === JSON.stringify(p.peerCurrent) ? previous.peer.source : null) : p.source,files:files(retainedPeer ? join(root,peerRel) : peerSource)} : previous?.peer, project:root, config:join(root,profile), updatedAt:new Date().toISOString() };
   prepare(manifest,undefined,JSON.stringify(record,null,2)+'\n');
   const exclude = resolve(root,exec(['git','rev-parse','--git-path','info/exclude'],root));
   const oldExclude = existsSync(exclude) ? read(exclude) : '';
-  const ignores = ['/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/'];
+  const ignores = ['/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/','/.archon/prepr-reviewers/sources/','/.archon/prepr-reviewers/drafts/','/.archon/prepr-reviewers/accepted/','/.archon/prepr-reviewers/registry.json'];
   const extra = ignores.filter(line=>!oldExclude.split('\n').includes(line));
   let applied = 0;
   try {
@@ -239,7 +261,7 @@ export async function verify(project: string, exec: Run = run, source?: string) 
 if (import.meta.main) {
   try {
     const [action,...args] = process.argv.slice(2);
-    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | plan <project> <source> | inspect <project> <codex,claude> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
+    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'stage-bundled' ? stageBundled(args[0],args[1]) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | plan <project> <source> | inspect <project> <codex,claude> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
     console.log(JSON.stringify(output,null,2));
   } catch(e) { console.error(JSON.stringify({status:'incomplete',error:String(e),unverified})); process.exitCode=1; }
 }

@@ -33,7 +33,7 @@ else if (process.env.PREPR_TEST_ACCEPTANCE) {
   const ids=JSON.parse(candidates?.[1] || '[]').map(f=>f.id).filter(id=>!current.includes(id));
   output(JSON.stringify({stance:'accept',verdict:'issue',rationale:'Anonymous requests crash if the user is missing. Duplicate-date data remains unverified.',sameConcernAs:ids}));
  } else {
-  const a=prompt.includes('reviewer-a-skill');
+  const a=process.argv.includes('--json');
   output(JSON.stringify({findings:[{summary:a?'missing request guard':'anonymous request crashes',file:'a.ts',line:1,severity:a?'P1':'Must fix',verdict:'issue',evidence:'Anonymous requests crash if the user is missing. Duplicate-date data remains unverified.'}],verification:[{name:'Tests',status:'not run',evidence:'Controlled fixture; no project tests executed.'}]}));
  }
 } else output('{"findings":[],"verification":"Tests not run; fixture review only."}');

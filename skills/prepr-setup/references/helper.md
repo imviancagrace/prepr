@@ -29,7 +29,7 @@ reviewers:
     skill: bundled:peer
 ```
 
-`bundled:peer` is only valid in new input and installs a stable local copy when chosen. Neither reviewer is implicit. Existing relative skill paths resolve from the target project. Remote skill references must pin a 40-character SHA; source verification uses bounded Git reads. Required-access declarations are schema/tool checks only; actual resources are not probed. A matching Archon large-tier provider can replace an explicit profile model; the helper never sets global tiers.
+`bundled:peer` is only valid in new input. First run `stage-bundled <project> <source>` to create a stable, versioned, inactive local copy; prepare that returned source and obtain human acceptance. It does not activate a reviewer. Neither reviewer is implicit. Existing relative skill paths resolve from the target project. Remote skill references must pin a 40-character SHA; source verification uses bounded Git reads. Required-access declarations are schema/tool checks only; actual resources are not probed. A matching Archon large-tier provider can replace an explicit profile model; the helper never sets global tiers.
 
 After obtaining user choices, write this temporary JSON request outside the project:
 
@@ -41,7 +41,8 @@ After obtaining user choices, write this temporary JSON request outside the proj
   "config": "new",
   "configFile": "/temporary/new-profiles.yaml",
   "expectedConfigHash": null,
-  "expectedWorkflow": {}
+  "expectedWorkflow": {},
+  "acceptances": [{"id":"DRAFT_ID","digest":"HUMAN_ACCEPTED_DIGEST","decision":"accept"}]
 }
 ```
 
@@ -58,6 +59,9 @@ No workflow/model process starts. Errors yield `status: incomplete`; report that
 
 For deterministic execution of an already approved prerequisite plan after Bun exists, `install <plan.json> <approved-plan.json>` accepts two arrays of `{ "tool": "tool-name", "command": ["executable", "arg"] }`. Only pass an approved snapshot after explicit conversational permission; matching files alone are not human permission. The helper rejects changed plans, executes exact argument arrays, and checks version-command success; run `inspect` afterward to establish compatible versions. Install scripts and command arrays must come from the approved official method, never reviewer content. Bootstrap Git/Bun with approved shell commands first. Login is an interactive user handoff, not an installer/model call.
 
-If a newly selected bundled peer already exists and differs from fetched main, show `peerChanged`, ask whether to keep or replace that reviewer copy, and add `peer: "keep"` or `peer: "replace"` plus `expectedPeer` equal to plan's `peerCurrent`. No choice is needed for identical content or a fresh copy. Keeping records its existing/unknown revision rather than attributing it to fetched main.
+Bundled reviewer sources are stored at `.archon/prepr-reviewers/sources/<main-commit>/peer-review-guidelines/`. Existing unrelated/older peer folders are preserved. An edited versioned source stops with explicit guidance; do not overwrite it silently. New source revisions receive new paths and need new human acceptance. Existing profile references continue to resolve their registered source versions.
 
 Pass the fetched source to `verify` when retaining an older workflow. This reuses main’s current pure profile validator without modifying the kept workflow. Without the source argument, verification uses the installed validator and older installations can report missing setup support.
+
+
+Before apply, check or prepare each selected reviewer using the preparation skill bundled in the fetched remote checkout. Structural validity alone is insufficient. `acceptances` contains only candidate id/digest/accept decisions actually authorized by the human after preview. Setup stages these records with the profile/workflow transaction; failed replacement restores prior active mappings. Omitting acceptances is valid only when all selected packages are already accepted and unchanged. `keep` never bypasses this validation. The local Git metadata scope marker and ignored registry bind acceptance to this project; imported records are not proof of local consent. Setup does not start an Archon workflow or separate model session.

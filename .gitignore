@@ -1,3 +1,8 @@
 .archon/artifacts/
 .archon/prepr.local.yaml
 node_modules/
+
+.archon/prepr-reviewers/drafts/
+.archon/prepr-reviewers/accepted/
+.archon/prepr-reviewers/registry.json
+.archon/prepr-reviewers/sources/

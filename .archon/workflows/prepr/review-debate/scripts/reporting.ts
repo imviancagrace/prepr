@@ -132,6 +132,7 @@ function entry(debate: Debate, isDisagreement: boolean): string {
   const title = short(finding.title || findingClaim(finding), 12);
   const references = [...new Set(debate.dispute.map(f => f.file ? `${f.file}${f.line !== undefined ? `:${f.line}` : ""}` : f.summary.match(/(?:[\w./-]+\.[\w]+|\.gitignore):\d+/)?.[0]).filter(Boolean).map(ref => `\`${ref}\``))];
   const lines = [bullet("Concern", `${concern}${references.length ? ` (${references.join(", ")})` : ""}`)];
+  for (const initial of debate.dispute) if (initial.question) lines.push(bullet(`${initial.reviewer === 'reviewer-a' ? 'A' : 'B'}'s question`, readable(initial.question)));
   if (isDisagreement) {
     const a = debate.dispute.find(f => f.reviewer === "reviewer-a"), b = debate.dispute.find(f => f.reviewer === "reviewer-b");
     const firstDifference = debate.rounds.find(round => opposite(round.positionA, round.positionB));

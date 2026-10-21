@@ -1,8 +1,9 @@
+import {fixtureDraft} from "./helpers/reviewers.ts";
 import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, chmodSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, chmodSync, existsSync, statSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { REMOTE, apply, plan, verify, fetchMain, commands, inspectTools, installApproved, type Run } from '../skills/prepr-setup/scripts/setup.ts';
+import { REMOTE, apply, plan, verify, fetchMain, commands, inspectTools, installApproved, stageBundled, type Run } from '../skills/prepr-setup/scripts/setup.ts';
 const repo = resolve(import.meta.dir,'..');
 function fixture() {
   const temp=mkdtempSync(join(tmpdir(),'prepr-setup-test-')), source=join(temp,'source'), project=join(temp,"project's checkout"), log:string[][]=[];
@@ -26,7 +27,10 @@ function fixture() {
   };
   const configFile=join(temp,'profiles.yaml');
   writeFileSync(configFile,'default_pair:\n  reviewer_a: a\n  reviewer_b: b\nreviewers:\n  a:\n    name: First\n    launcher: codex\n    model: test\n    skill: bundled:peer\n  b:\n    name: Second\n    launcher: codex\n    skill: bundled:peer\n');
-  const request=()=>{const p=plan(project,source,exec);return {project,source,workflow:'replace' as const,config:'new' as const,configFile,expectedConfigHash:p.configHash,expectedWorkflow:p.current};};
+  const request=()=>{const p=plan(project,source,exec);const staged=stageBundled(project,source,exec);const acceptances:any[]=[];
+   const incoming:any=Bun.YAML.parse(readFileSync(configFile,'utf8'));
+   for(const item of Object.values(incoming?.reviewers??{}) as any[]) try {const r=fixtureDraft(project,item.skill==='bundled:peer'?staged.source:item.skill,exec);acceptances.push({id:r.id,digest:r.digest,decision:'accept'});}catch{}
+   return {project,source,workflow:'replace' as const,config:'new' as const,configFile,expectedConfigHash:p.configHash,expectedWorkflow:p.current,acceptances};};
   return {temp,source,project,log,exec,git,configFile,request,cleanup:()=>rmSync(temp,{recursive:true,force:true})};
 }
 test('fresh remote main install preserves modes, peer lifetime, ignores, provenance and command-only handoff',async()=>{
@@ -125,18 +129,18 @@ test('pinned remote reviewer is verified with Git only and missing commit stops 
    if(args[0]==='git' && args[1]==='clone' && args.includes('https://github.com/example/reviewers.git')) {f.log.push(args); f.git(['clone','--quiet','--no-checkout',f.source,args.at(-1)!]);return '';}
    return f.exec(args,cwd);
   };
-  await apply(f.request(),exec);expect(f.log.some(a=>a.includes('cat-file'))).toBe(true);
+  const request=f.request();const preview=fixtureDraft(f.project,config.reviewers.a.skill,exec);request.acceptances.push({id:preview.id,digest:preview.digest,decision:'accept'});
+  await apply(request,exec);expect(f.log.some(a=>a.includes('checkout'))).toBe(true);
   const original=readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8');
   config.reviewers.a.skill=`github:example/reviewers@${'0'.repeat(40)}:reviewers/peer-review-guidelines`;writeFileSync(f.configFile,Bun.YAML.stringify(config));
   await expect(apply(f.request(),exec)).rejects.toThrow();expect(readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8')).toBe(original);
  }finally{f.cleanup();}
 });
-test('bundled peer replacement requires its own choice and preserves a recoverable original',async()=>{
+test('modified versioned bundled source cannot be silently overwritten',async()=>{
  const f=fixture();try{
-  await apply(f.request(),f.exec);const path=join(f.project,'.archon/prepr-reviewers/peer-review-guidelines/SKILL.md');const custom=readFileSync(path,'utf8')+'\nCustom';writeFileSync(path,custom);
-  await expect(apply(f.request(),f.exec)).rejects.toThrow('Bundled peer differs');
-  const p=plan(f.project,f.source,f.exec);await apply({...f.request(),peer:'keep',expectedPeer:p.peerCurrent},f.exec);expect(readFileSync(path,'utf8')).toBe(custom);
-  await apply({...f.request(),peer:'replace',expectedPeer:p.peerCurrent},f.exec);expect(readFileSync(path,'utf8')).not.toBe(custom);
+  await apply(f.request(),f.exec);const path=join(stageBundled(f.project,f.source,f.exec).source,'SKILL.md');
+  const custom=readFileSync(path,'utf8')+'\nCustom';writeFileSync(path,custom);
+  expect(()=>stageBundled(f.project,f.source,f.exec)).toThrow('modified');expect(readFileSync(path,'utf8')).toBe(custom);
  }finally{f.cleanup();}
 });
 test('retaining an older workflow uses fetched pure validation without changing installed code',async()=>{
@@ -145,5 +149,18 @@ test('retaining an older workflow uses fetched pure validation without changing 
   const legacy=readFileSync(path,'utf8').replace('export function chooseReferences','function chooseReferences');writeFileSync(path,legacy);
   await apply({...f.request(),workflow:'keep',config:'keep'},f.exec);
   await verify(f.project,f.exec,f.source);expect(readFileSync(path,'utf8')).toBe(legacy);
+ }finally{f.cleanup();}
+});
+
+test('declined acceptance and failed profile swap preserve the prior registry and active pair',async()=>{
+ const f=fixture();try{
+  await apply(f.request(),f.exec);
+  const registry=join(f.project,'.archon/prepr-reviewers/registry.json'),profile=join(f.project,'.archon/prepr.local.yaml');
+  const beforeRegistry=readFileSync(registry,'utf8'),beforeProfile=readFileSync(profile,'utf8');
+  const request=f.request();request.acceptances[0].decision='reject';
+  await expect(apply(request,f.exec)).rejects.toThrow('declined');
+  expect(readFileSync(registry,'utf8')).toBe(beforeRegistry);expect(readFileSync(profile,'utf8')).toBe(beforeProfile);
+  await expect(apply(f.request(),f.exec,(from,to)=>{if(String(to).endsWith('prepr.local.yaml'))throw new Error('profile swap failed');renameSync(from,to);})).rejects.toThrow('profile swap');
+  expect(readFileSync(registry,'utf8')).toBe(beforeRegistry);expect(readFileSync(profile,'utf8')).toBe(beforeProfile);
  }finally{f.cleanup();}
 });

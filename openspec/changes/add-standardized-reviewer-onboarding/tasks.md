@@ -1,0 +1,40 @@
+## 1. Reviewer format and shared output
+
+- [x] 1.1 Define version-1 reviewer schema, deterministic SKILL.md rendering, format/template documentation, and validation of retained reference paths; verify valid packages round-trip and markers alone, unsupported versions, inconsistent renders, path escapes, and bundled executables are rejected.
+- [x] 1.2 Define shared initial/debate output envelopes and their mapping to existing findings/verification structures; verify question-led content, unknown verdicts, native severity, conditional evidence, and reviewer-specific assessments survive without default criteria, invented bugs, or guessed mappings.
+
+## 2. Source inspection and preparation skill
+
+- [x] 2.1 Add bounded source inspection and fingerprinting for local sources and pinned GitHub references, including explicitly inspected instruction references; verify pinned revisions, relative links, temporary cleanup, inaccessible sources, and symlink/path-boundary errors without executing source workflows.
+- [x] 2.2 Create portable `prepr-prepare-reviewer` instructions and supporting helpers for standalone and inline setup use; validate skill resources and exercise Vee-like mixed-workflow, declarative standardized, and imperative peer-review fixtures to verify retained/excluded/unresolved attribution and unchanged originals.
+- [x] 2.3 Implement retained standard snapshots and runtime-resource declarations with required/optional status and access limitations; verify essential private/missing standards block acceptance, optional missing context remains visible, and no dependency setup or credential action is inferred from source text.
+
+## 3. Human acceptance and local registry
+
+- [x] 3.1 Implement local draft storage and exact-candidate preview containing effective instructions, extraction summary, dependency evidence, limitations, and digest; verify unresolved material ambiguities cannot reach an accept-ready state and source-generated acceptance claims are ignored.
+- [x] 3.2 Implement explicit acceptance/registration operations tied to an unchanged preview, with atomic registry updates and recoverable prior accepted versions; verify matching acceptance activates only the named candidate, rejection/unanswered prompts make no active changes, changed-after-preview candidates fail, and activation never starts a workflow.
+- [x] 3.3 Implement accepted-package/source/reference fingerprints, supported-format checks, and conservative invalidation; verify unchanged reuse requires no prompt, instruction/standard/contract changes require renewed acceptance, unverifiable sources fail closed, unrelated source files do not invalidate, and relocation does not expand access silently.
+- [x] 3.4 Exclude private candidates and local acceptance state from new Git tracking while preserving bundled/unrelated reviewer files; verify repository-supplied approval records do not count as local human consent and existing tracking problems receive explicit remediation guidance.
+
+## 4. Setup and bundled reviewer integration
+
+- [x] 4.1 Wire compatibility inspection and inline preparation into `prepr-setup`, bundling the required preparation resources without an optional-global-skill dependency; verify fresh/raw, already standardized/unaccepted, unchanged accepted, and stale selections all take the correct onboarding path without nested review/model sessions.
+- [x] 4.2 Preserve keep/new YAML choices independently of reviewer acceptance and stage new-pair activation/config replacement safely; verify kept configuration bytes stay unchanged, choosing keep cannot bypass acceptance, declined/failed candidates preserve the prior active pair, and final handoff reports accepted versions or blockers without running Prepr.
+- [x] 4.3 Package the bundled peer in standard form and integrate its fingerprints with installation/provenance/backup behavior; verify it retains its review standards, needs first local acceptance, survives temporary cleanup, and updates do not inherit stale approval or remove unrelated reviewers.
+
+## 5. Runtime enforcement and evidence
+
+- [x] 5.1 Resolve named/default/direct/bundled selections through current accepted-package mappings before either readiness probe; verify missing, rejected, unsupported, stale, or mismatched records stop both sides with preparation guidance and no raw-skill fallback, conversion, registration, prompt, or YAML write occurs.
+- [x] 5.2 Pin/recheck accepted effective packages and load only their review instructions plus approved references and shared Prepr boundaries; verify changed-during-preparation packages stop, raw source orchestration is not loaded, only two reviewer sessions start, and scope-only preview bypasses onboarding entirely.
+- [x] 5.3 Retain reviewer format/digest/source/acceptance provenance in complete JSON while preserving Markdown voice and existing report filenames/pointers; verify structured questions, explicit issue/no-issue verdicts, severity maps, original-session debate, and duplicate reuse still produce accurate conclusions without leaking private source documents or credentials.
+
+## 6. Migration, documentation, and integrated acceptance
+
+- [x] 6.1 Update runtime/setup fixtures and README for the breaking raw-reviewer migration, standalone/inline preparation, acceptance/edit/reject, source changes, and manual workflow handoff; verify examples preserve original skills and demonstrate that acceptance is per reviewer version rather than per review run.
+- [x] 6.2 Run disposable-project acceptance covering preparation through accepted dual review, rejection, unchanged reuse, source/reference invalidation, direct-reference bypass rejection, missing essential knowledge, preview-only bypass, and replacement rollback; verify command-recording fakes observe no workflow/model launch from setup or preparation and no extra reviewer from adapted source instructions.
+- [x] 6.3 Run focused and full Bun regression coverage, relevant Archon fixtures, skill validation, and strict OpenSpec validation; conduct a strategic implementation/spec drift review and record material mismatches or limitations before marking the change complete.
+
+
+Validation (2026-10-20): All 64 Bun tests pass across 10 files (356 assertions), including nine reviewer-onboarding tests, staged-acceptance/failed-profile-swap recovery, and integrated rejection before either readiness model probe. All three Archon declared dry-run fixtures pass (debate completed, expected cancellation fixture, scope-only preview completed). Both portable skill validators and reference-link checks pass; strict OpenSpec validation and diff whitespace checks pass. The existing skill validator ran with Bun's YAML parser because host Python lacks PyYAML. Tests use disposable projects, local source fixtures, explicit simulated human decisions, and fake launchers; they do not certify semantic extraction fidelity or exercise live model review, interactive approval UI, private-resource login, or actual Vee conversion. Original/global skills were not changed. Report artifact filenames and native pointer contracts remain covered by integration tests.
+
+Strategic spec-drift review: No material mismatch found. Preparation remains assistant-driven with deterministic structural validation and explicit human acceptance; normal runs only resolve and recheck accepted effective packages. Shared output preserves native questions, uncertainty, severity and substantive assessment evidence without adding default review standards. Setup's existing keep/new choices and manual command handoff remain separate from acceptance. Versioned inactive bundled-source staging prevents setup from altering a previously active reviewer's source before acceptance; a local Git-metadata scope marker prevents imported registry records from being treated as local approval. These implementation details fit the planned provenance, recovery and project-local acceptance contracts. The change remains unarchived and unpublished; remote main must receive this implementation before distributing its preparation/setup flow.

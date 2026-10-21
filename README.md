@@ -30,6 +30,20 @@ Setup validates files, versions, skill references, and model configuration witho
 
 The helper requires the setup-compatible profile validator shipped with this version of Prepr; publish this version to remote `main` before distributing the skill. It fails clearly if fetched main predates that support. POSIX helper/bootstrap flows are provided for macOS, Linux, and WSL; native Windows users should follow the skill's documented WSL/manual path rather than run shell commands in PowerShell. Installation methods and acceptance limits are in the skill's [prerequisite reference](skills/prepr-setup/references/prerequisites.md).
 
+## Prepare and accept reviewers
+
+Normal Prepr runs require **locally accepted standardized reviewer packages** for both selections, including direct skill overrides and the bundled peer. Existing raw skill references must be onboarded first. Scope-only previews continue to work without reviewers.
+
+Use `$prepr-prepare-reviewer` in Codex or `/prepr-prepare-reviewer` in Claude Code, or let `prepr-setup` perform preparation inline. The standalone [preparation skill](skills/prepr-prepare-reviewer/SKILL.md) can be installed by copying its entire folder into your host's skill directory. Setup reads the preparation resources shipped in its fresh remote-main checkout, so a separate global installation is optional.
+
+Preparation reads the original skill as data, preserves its review criteria and voice, and creates a separate version-1 reviewer package. It excludes independent checkout/PR/setup/extra-reviewer procedures. Essential domain standards are retained; inaccessible essential references and material ambiguities block acceptance. The original skill is never rewritten. The [format reference](skills/prepr-prepare-reviewer/references/format.md) documents the shared structure and helper commands.
+
+Before activation, the assistant shows the effective instructions, retained/excluded summary, dependencies, limitations, and exact digest and asks you to **accept, edit, or reject**. Choosing the reviewer or keeping existing configuration does not count as acceptance. Unanswered/declined candidates stay inactive. Setup stages accepted changes with profile replacement so failures preserve the prior pair. Acceptance never starts a review.
+
+Unchanged accepted versions need no repeated approval. Version 1 conservatively requires renewed acceptance when source instructions or retained standards change, including cosmetic edits. Unknown freshness, unsupported formats, or altered packages stop a normal run with preparation guidance; it does not silently convert or fall back to the original. Local registry, private drafts, and accepted copies are excluded from new Git tracking; approvals are project-local and not portable claims from a downloaded package.
+
+Your profile's `skill` continues to identify the source; Prepr resolves the accepted effective copy through the local registry. Review sessions load the effective instructions and retained references. Native severity labels and question-led text remain distinct; shared JSON structure adds no common review checklist or automatic issue verdict. The complete report retains effective reviewer/source/acceptance provenance, with the same `prepr-report.md` and `prepr-report.json` artifact delivery.
+
 ## Configure reviewer profiles
 
 Profiles are local-only and ignored by Git. Create `.archon/prepr.local.yaml` in the checkout:

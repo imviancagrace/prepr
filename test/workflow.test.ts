@@ -1,3 +1,4 @@
+import {fixtureReviewer} from "./helpers/reviewers.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +12,12 @@ test("distinct original reviewers debate, then deliver both report artifacts wit
   const b: Reviewer = { name: "Security", reference: "fixture-b", skillPath: join(fixtures, "reviewer-b-skill/SKILL.md"), launcher: "claude", model: "fixture" };
   const previousA = Bun.env.PREPR_CODEX_BIN, previousB = Bun.env.PREPR_CLAUDE_BIN;
   const dir = await mkdtemp(join(tmpdir(), "prepr-report-test-"));
+  const oldCwd = process.cwd();
   try {
+    Bun.spawnSync(["git","init"],{cwd:dir});
+    Object.assign(a,{reference:a.skillPath},fixtureReviewer(dir,a.skillPath));
+    Object.assign(b,{reference:b.skillPath},fixtureReviewer(dir,b.skillPath));
+    process.chdir(dir);
     Bun.env.PREPR_CODEX_BIN = join(fixtures, "fake-codex-multiround");
     Bun.env.PREPR_CLAUDE_BIN = join(fixtures, "fake-claude-multiround");
     const [reviewA, reviewB] = await Promise.all([runInitialAgent(a), runInitialAgent(b)]);
@@ -31,10 +37,10 @@ test("distinct original reviewers debate, then deliver both report artifacts wit
     expect(summary).toContain("No change is needed for this concern; both reviewers concluded this is not an issue.");
     expect(report.initialReviews?.a.rawStdout).toContain("thread.started");
     // The delivery script receives saved evidence only; launchers cannot be used during rendering.
-    const process = Bun.spawn(["bun", join(root, ".archon/workflows/prepr/review-debate/scripts/report.ts")], {
+    const deliveryProcess = Bun.spawn(["bun", join(root, ".archon/workflows/prepr/review-debate/scripts/report.ts")], {
       cwd: root, stdout: "pipe", stderr: "pipe", env: { ...Bun.env, PREPR_CODEX_BIN: "/does-not-exist", PREPR_CLAUDE_BIN: "/does-not-exist", ARTIFACTS_DIR: dir, WORKFLOW_ID: "fixture-run", INPUTS_COMPARISON: JSON.stringify(comparison), INPUTS_DEBATES: JSON.stringify([debate]) },
     });
-    const [out, err, code] = await Promise.all([new Response(process.stdout).text(), new Response(process.stderr).text(), process.exited]);
+    const [out, err, code] = await Promise.all([new Response(deliveryProcess.stdout).text(), new Response(deliveryProcess.stderr).text(), deliveryProcess.exited]);
     expect(err).toBe("");
     expect(code).toBe(0);
     expect(JSON.parse(out).report).toEqual({ type: "archon_artifact", run_id: "fixture-run", path: "prepr-report.md" });
@@ -45,6 +51,7 @@ test("distinct original reviewers debate, then deliver both report artifacts wit
     expect(data.initialReviews.a.stdout).toBe(reviewA.stdout);
     expect(data.confirmedBugs).toHaveLength(0);
   } finally {
+    process.chdir(oldCwd);
     if (previousA === undefined) delete Bun.env.PREPR_CODEX_BIN; else Bun.env.PREPR_CODEX_BIN = previousA;
     if (previousB === undefined) delete Bun.env.PREPR_CLAUDE_BIN; else Bun.env.PREPR_CLAUDE_BIN = previousB;
     await rm(dir, { recursive: true });

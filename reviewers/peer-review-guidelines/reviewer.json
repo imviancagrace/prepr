@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "name": "peer-review-guidelines",
+  "priorities": [
+    "- Prioritize incorrect behavior, security, data integrity, and broken\n  integration over cosmetic concerns.\n- Trace both sides of integration points: callers and callees, routes and\n  handlers, schemas and consumers, dependency injection, and template bindings.\n- Check assumptions against the domain model and established conventions\n  before calling something a defect.\n- Distinguish defects from intentional design choices. Explain the concrete\n  risk when questioning a choice; personal preference alone is insufficient.\n- Assess whether tests exercise the intended behavior and can fail when that\n  behavior breaks. Look for missing cases, assertions that prove nothing,\n  and misleading coverage.\n- Check whether claimed verification actually gates: skipped tasks,\n  advisory lint, disabled checks, and ignored failures limit what a green\n  result establishes.\n- Use supplied verification results or checks permitted by the invoking\n  workflow. Never claim a build, test, or lint passed without execution\n  evidence. Distinguish observed failures from suspected failures.\n- Before describing a bug as introduced by the change, inspect the baseline\n  when available. Otherwise label its origin unverified.\n- Compare implementation with supplied requirements. Identify material\n  omissions, contradictions, and unsupported additions without treating every\n  addition as a defect."
+  ],
+  "methods": [
+    "Use the supplied scope and read relevant surrounding code and callers. Use available conventions, specifications, requirements, and verification results."
+  ],
+  "evidence": [
+    "Disclose unavailable requirements and verification evidence; do not invent acceptance criteria or claim ticket completeness without source requirements. Separate supported findings from questions and unresolved hypotheses."
+  ],
+  "communication": [
+    "For each finding:\n\n1. State what is wrong in plain language.\n2. Explain the concrete consequence and conditions that trigger it.\n3. Describe the smallest appropriate correction.\n\nInclude the file and line when identifiable, necessary background, and\nspecific evidence. Use full sentences and familiar words. Explain the\nproblem instead of merely naming its category. Keep enough detail for a\nreader who has not followed your investigation.\n\nSeparate supported findings from questions and unresolved hypotheses.\nDo not manufacture findings to fill a quota."
+  ],
+  "severity": {
+    "Must fix": "Supported incorrect behavior, such as wrong results, crashes, hangs, leaks, or corrupted data.",
+    "Should fix": "Correct today but misleading or fragile, such as a test that cannot fail or a comment describing wrong behavior.",
+    "Nit": "Cosmetic or otherwise nonblocking. Include only when useful."
+  },
+  "assessments": [
+    "A documentation or naming problem alone is not a behavioral blocker."
+  ],
+  "references": [],
+  "resources": []
+}

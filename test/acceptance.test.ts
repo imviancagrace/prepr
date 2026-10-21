@@ -1,3 +1,4 @@
+import {fixtureReviewer} from "./helpers/reviewers.ts";
 import {expect,test} from 'bun:test';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -26,6 +27,8 @@ test('controlled preparation, two reviews, mapped severity, duplicate reuse and 
   expect(previewDelivery.output.report).toBeUndefined();
   captured=await run(join(scripts,'capture-diff.ts'),{scope:'local',preview_only:'false'});
   const inputs={reviewer_a:'',reviewer_b:'',reviewer_a_launcher:'',reviewer_b_launcher:'',reviewer_a_model:'',reviewer_b_model:''};
+  const unprepared=await run(join(scripts,'select-reviewers.ts'),inputs);expect(unprepared.code).not.toBe(0);expect(unprepared.stderr).toContain('prepare-reviewer');expect(await Bun.file(log).exists()).toBe(false);
+  fixtureReviewer(repo,join(fixture,'reviewer-a-skill'));fixtureReviewer(repo,join(fixture,'reviewer-b-skill'));
   const failed=await run(join(scripts,'select-reviewers.ts'),inputs,{PREPR_TEST_FAIL:'1'});expect(failed.code).not.toBe(0);expect(failed.stderr).toContain('Neither code review');
   expect((await Bun.file(log).text()).trim().split('\n').map(l=>JSON.parse(l)).every(x=>x.probe)).toBe(true);
   await Bun.write(log,'');
@@ -41,7 +44,7 @@ test('controlled preparation, two reviews, mapped severity, duplicate reuse and 
   expect(delivery.output.report).toEqual({type:'archon_artifact',run_id:'acceptance',path:'prepr-report.md'});
   expect(delivery.output.data.path).toBe('prepr-report.json');
   const data=await Bun.file(join(artifacts,'prepr-report.json')).json(),text=await Bun.file(join(artifacts,'prepr-report.md')).text();
-  expect(data.confirmedBugs).toHaveLength(1);expect(data.preparation.readiness.a.status).toBe('ready');
+  expect(data.initialReviews.a.reviewerPackage.format).toBe(1);expect(data.initialReviews.a.reviewerPackage.digest).toBeDefined();expect(data.confirmedBugs).toHaveLength(1);expect(data.preparation.readiness.a.status).toBe('ready');
   expect(text).toContain('Tests: not run');expect(text).toContain('Duplicate-date data remains unverified.');expect(text).not.toContain('## Disagreements');
   const calls=(await Bun.file(log).text()).trim().split('\n').map(l=>JSON.parse(l));expect(calls.filter(x=>!x.probe)).toHaveLength(4);
   expect(git('diff')).toBe(before);expect(git('status','--porcelain')).toBe(' M a.ts\n');

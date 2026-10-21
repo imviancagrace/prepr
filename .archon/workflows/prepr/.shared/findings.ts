@@ -3,7 +3,7 @@ import { isAbsolute, relative } from "node:path";
 export type Finding = {
   id: string; reviewer: string; summary: string; evidence: string;
   file?: string; line?: number; severity?: string; verdict?: string;
-  title?: string; impact?: string; sources?: string[];
+  title?: string; impact?: string; question?: string; kind?: string; sources?: string[];
   severityLevel?: string; severityMappingSource?: string;
 };
 
@@ -62,7 +62,7 @@ export function findings(reviewer: string, transcript: string, cwd = process.cwd
     try { parsed = JSON.parse(candidate); } catch { continue; }
     if (!parsed || !Array.isArray(parsed.findings)) continue;
     return consolidate(parsed.findings.filter((item: unknown) => item && typeof item === "object").flatMap((item: Record<string, unknown>, index: number) => {
-      const summary = String(item.summary ?? item.title ?? item.message ?? "");
+      const summary = String(item.summary ?? item.question ?? item.title ?? item.message ?? "");
       if (!claim(summary) || ignored(summary)) return [];
       const at = anchor(summary);
       return [{
@@ -72,6 +72,8 @@ export function findings(reviewer: string, transcript: string, cwd = process.cwd
         line: typeof item.line === "number" ? item.line : at.line,
         severity: typeof item.severity === "string" ? item.severity : undefined,
         verdict: item.verdict === "issue" || item.verdict === "no_issue" ? item.verdict : undefined,
+        question: typeof item.question === "string" ? item.question : undefined,
+        kind: ["issue","question","hypothesis"].includes(String(item.kind)) ? String(item.kind) : undefined,
         title: typeof item.title === "string" ? item.title : undefined,
         impact: typeof item.impact === "string" ? item.impact : undefined,
       }];

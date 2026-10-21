@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { compare, debatePosition, findings, selectReviewers } from "../.archon/workflows/prepr/.shared/core.ts";
+import { compare, debatePosition, findings, selectReviewers, chooseReferences } from "../.archon/workflows/prepr/.shared/core.ts";
 import { buildReport, markdownReport } from "../.archon/workflows/prepr/review-debate/scripts/reporting.ts";
 
 test("normalizes structured findings and matches equivalent claims", () => {
@@ -22,16 +22,14 @@ test("classifies incompatible anchored findings as a dispute", () => {
   expect(compare(a, b).disputes).toHaveLength(1);
 });
 
-test("resolves local skill directories supplied directly", () => {
-  const selected = selectReviewers(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", ".archon/workflows/prepr/review-debate/fixtures/reviewer-b-skill", "codex", "claude");
-  expect(selected.reviewerA.skillPath).toEndWith("reviewer-a-skill/SKILL.md");
-  expect(selected.reviewerB.name).toBe("reviewer-b-skill");
+test("raw direct reviewers require onboarding", () => {
+  expect(() => selectReviewers(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", ".archon/workflows/prepr/review-debate/fixtures/reviewer-b-skill", "codex", "claude")).toThrow("accepted standardized package");
 });
 
 test("uses a direct reference before a named local profile", () => {
   const previous = Bun.env.PREPR_PROFILE_PATH;
   Bun.env.PREPR_PROFILE_PATH = ".archon/workflows/prepr/review-debate/fixtures/profiles.yaml";
-  const selected = selectReviewers(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", "fixture-b", "codex");
+  const selected = chooseReferences(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", "fixture-b", "codex", "", "", "");
   if (previous === undefined) delete Bun.env.PREPR_PROFILE_PATH; else Bun.env.PREPR_PROFILE_PATH = previous;
   expect(selected.reviewerA.name).toBe("reviewer-a-skill");
   expect(selected.reviewerB.name).toBe("Fixture B");
@@ -41,7 +39,7 @@ test("uses a direct reference before a named local profile", () => {
 test("uses the local default pair when no overrides are supplied", () => {
   const previous = Bun.env.PREPR_PROFILE_PATH;
   Bun.env.PREPR_PROFILE_PATH = ".archon/workflows/prepr/review-debate/fixtures/profiles.yaml";
-  const selected = selectReviewers("", "");
+  const selected = chooseReferences("", "", "", "", "", "");
   if (previous === undefined) delete Bun.env.PREPR_PROFILE_PATH; else Bun.env.PREPR_PROFILE_PATH = previous;
   expect(selected.reviewerA.name).toBe("Fixture A");
   expect(selected.reviewerB.name).toBe("Fixture B");
@@ -52,7 +50,7 @@ test("requires a launcher for a direct skill reference", () => {
 });
 
 test("keeps a direct skill model pin", () => {
-  const selected = selectReviewers(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", ".archon/workflows/prepr/review-debate/fixtures/reviewer-b-skill", "codex", "claude", "gpt-5.6-sol");
+  const selected = chooseReferences(".archon/workflows/prepr/review-debate/fixtures/reviewer-a-skill", ".archon/workflows/prepr/review-debate/fixtures/reviewer-b-skill", "codex", "claude", "gpt-5.6-sol");
   expect(selected.reviewerA.model).toBe("gpt-5.6-sol");
 });
 

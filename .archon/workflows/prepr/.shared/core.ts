@@ -1,4 +1,5 @@
-import { basename, isAbsolute, resolve } from "node:path";
+import { resolveAccepted, recheckReviewer, outputContract } from "./reviewers.ts";
+import { basename, resolve } from "node:path";
 
 import { sameLocation, severityConflict, applySeverity, type Finding } from "./findings.ts";
 import type { Reuse } from "./reuse.ts";
@@ -6,9 +7,9 @@ import type { ReviewScope } from "./scope.ts";
 export { findings, compare, sameConcern, type Finding, type Comparison } from "./findings.ts";
 export type Launcher = "codex" | "claude";
 export type RequiredAccess = { tool: string; resource: string };
-export type Reviewer = { name: string; reference: string; skillPath: string; launcher: Launcher; model?: string; requiredAccess?: RequiredAccess[]; severityMap?: Record<string, string> };
+export type Reviewer = { name: string; reference: string; skillPath: string; launcher: Launcher; model?: string; reviewerPackage?: any; requiredAccess?: RequiredAccess[]; severityMap?: Record<string, string> };
 export type Readiness = { reviewer: string; launcher: Launcher; model: string; status: "ready" | "failed"; evidence: string; resources: { tool: string; resource: string; status: "verified" | "unverifiable" }[]; probe?: ReviewResult };
-export type ReviewResult = { reviewer: string; phase: "initial" | "debate" | "readiness"; status: "completed" | "failed" | "timed_out"; stdout: string; stderr: string; exitCode: number | null; sessionId?: string; rawStdout?: string; scope?: ReviewScope; readiness?: Readiness; severityMap?: Record<string, string> };
+export type ReviewResult = { reviewer: string; phase: "initial" | "debate" | "readiness"; status: "completed" | "failed" | "timed_out"; stdout: string; stderr: string; exitCode: number | null; sessionId?: string; rawStdout?: string; scope?: ReviewScope; readiness?: Readiness; reviewerPackage?: any; severityMap?: Record<string, string> };
 export type DebatePosition = { stance: "maintain" | "revise" | "accept" | "agree_to_disagree"; verdict?: "issue" | "no_issue"; rationale: string; correctedFinding?: string; confidence?: string; severity?: string; severityLevel?: string; sameConcernAs?: string[] };
 export type Debate = { dispute: Finding[]; rounds: { round: number; reviewerA: ReviewResult; reviewerB: ReviewResult; positionA: DebatePosition; positionB: DebatePosition }[]; reuse?: Reuse; stopReason: "reused" | "agreement" | "agree_to_disagree" | "no_material_movement" | "max_rounds" | "incomplete"; conclusion: "converged-on-issue" | "converged-on-no-issue" | "unresolved" };
 export const input = (name: string) => { const value = Bun.env[`INPUTS_${name}`]; if (value === undefined) throw new Error(`Missing workflow input: ${name}`); return value; };
@@ -47,27 +48,13 @@ export function chooseReferences(selectedA: string, selectedB: string, launcherA
   };
   return { reviewerA: resolveSelection(selectedA, launcherA, modelA, "reviewer_a"), reviewerB: resolveSelection(selectedB, launcherB, modelB, "reviewer_b") };
 }
-const githubRef = (reference: string) => {
-  const match = reference.match(/^(?:github:|https:\/\/github\.com\/)([^/#]+\/[^/@#]+)@([0-9a-f]{40})(?::|#)(.+)$/i);
-  return match ? { repository: match[1], commit: match[2], skill: match[3] } : null;
-};
-function skillFile(root: string) { const candidate = root.endsWith("SKILL.md") ? root : resolve(root, "SKILL.md"); if (!Bun.file(candidate).size) throw new Error(`Reviewer skill was not found at ${candidate}.`); return candidate; }
-function resolveSkill(reference: string): string {
-  const remote = githubRef(reference);
-  if (!remote) { if (/github\.com/.test(reference)) throw new Error("GitHub skills must be pinned: github:owner/repo@<40-character-commit>:path/to/skill."); return skillFile(isAbsolute(reference) ? reference : resolve(process.cwd(), reference)); }
-  const destination = Bun.spawnSync(["mktemp", "-d", "/tmp/prepr-skill-XXXXXX"]);
-  if (destination.exitCode !== 0) throw new Error("Could not create a temporary directory for the GitHub reviewer skill.");
-  const checkout = `${destination.stdout.toString().trim()}/source`;
-  const clone = Bun.spawnSync(["git", "clone", "--quiet", `https://github.com/${remote.repository}.git`, checkout]);
-  if (clone.exitCode !== 0) throw new Error(`Could not fetch pinned reviewer skill ${reference}: ${clone.stderr.toString().trim()}`);
-  const pinned = Bun.spawnSync(["git", "-C", checkout, "checkout", "--quiet", remote.commit]);
-  if (pinned.exitCode !== 0) throw new Error(`Could not resolve pinned commit ${remote.commit} for ${remote.repository}.`);
-  return skillFile(resolve(checkout, remote.skill));
-}
 export function selectReviewers(selectedA: string, selectedB: string, launcherA = "", launcherB = "", modelA = "", modelB = ""): { reviewerA: Reviewer; reviewerB: Reviewer } {
   const refs = chooseReferences(selectedA, selectedB, launcherA, launcherB, modelA, modelB);
-  const makeReviewer = (ref: { name: string; reference: string; launcher: Launcher; model?: string; severityMap?: Record<string,string>; requiredAccess?: RequiredAccess[] }): Reviewer => ({ ...ref, skillPath: resolveSkill(ref.reference) });
-  return { reviewerA: makeReviewer(refs.reviewerA), reviewerB: makeReviewer(refs.reviewerB) };
+  const makeReviewer = (ref: { name: string; reference: string; launcher: Launcher; model?: string; severityMap?: Record<string,string>; requiredAccess?: RequiredAccess[] }, side: string): Reviewer => {
+    try { const accepted = resolveAccepted(ref.reference); return { ...ref, ...accepted, requiredAccess: [...(ref.requiredAccess ?? []), ...accepted.requiredAccess] }; }
+    catch (error) { throw new Error(`${side} (${ref.name}): ${error}`); }
+  };
+  return { reviewerA: makeReviewer(refs.reviewerA, "Reviewer A"), reviewerB: makeReviewer(refs.reviewerB, "Reviewer B") };
 }
 
 const parseEvent = (line: string) => { try { return JSON.parse(line) as Record<string, any>; } catch { return {}; } };
@@ -95,7 +82,7 @@ const runAgent = async (args: string[], reviewer: Reviewer, phase: ReviewResult[
   const [raw, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]); const events = raw.split("\n").map(parseEvent), text = events.map(reviewer.launcher === "codex" ? codexText : claudeText).filter(Boolean).join("\n");
   return { reviewer: reviewer.name, phase, status: timedOut ? "timed_out" : exitCode === 0 ? "completed" : "failed", stdout: text || raw, rawStdout: raw, stderr, exitCode, sessionId: events.map(session).find(Boolean) };
 };
-export const agentPrompt = (reviewer: Reviewer, scope?: ReviewScope) => `You are one side of a private pre-PR review. Read and faithfully follow only the reviewer skill at ${reviewer.skillPath}. ${scope?.mode === "branch" ? `Review the committed local branch change in this pinned scope: ${JSON.stringify(scope)}. Inspect git diff ${scope.startingPointSha} ${scope.targetSha} and surrounding code/specs at that target. This is an explicit local historical snapshot; preserve it even if remote refs advance. Do not check out, fast-forward, or replace the selected revision. Read pinned Git objects if the checkout changes. Disclose any later freshness changes instead of silently changing scope.` : scope ? `Review only this captured local-work snapshot: ${JSON.stringify(scope)}. Read the saved JSON at snapshotPath: staged and unstaged patches plus untracked content encoded as base64 (symlinks record their target). Inspect relevant surrounding code at the captured target SHA when applicable. Do not add subsequent working-tree changes to the scope. Disclose changed evidence rather than substituting a different target.` : "Review the current local Git change."} Do not create a PR, comment on GitHub, commit, push, or modify files. Return findings in the format required by that skill.`;
+export const agentPrompt = (reviewer: Reviewer, scope?: ReviewScope) => `You are one side of a private pre-PR review. Read and faithfully follow only the reviewer skill at ${reviewer.skillPath}. ${scope?.mode === "branch" ? `Review the committed local branch change in this pinned scope: ${JSON.stringify(scope)}. Inspect git diff ${scope.startingPointSha} ${scope.targetSha} and surrounding code/specs at that target. This is an explicit local historical snapshot; preserve it even if remote refs advance. Do not check out, fast-forward, or replace the selected revision. Read pinned Git objects if the checkout changes. Disclose any later freshness changes instead of silently changing scope.` : scope ? `Review only this captured local-work snapshot: ${JSON.stringify(scope)}. Read the saved JSON at snapshotPath: staged and unstaged patches plus untracked content encoded as base64 (symlinks record their target). Inspect relevant surrounding code at the captured target SHA when applicable. Do not add subsequent working-tree changes to the scope. Disclose changed evidence rather than substituting a different target.` : "Review the current local Git change."} Do not create a PR, comment on GitHub, commit, push, or modify files. Use the shared structural contract without adding review criteria: ${outputContract}`;
 const withModel = (reviewer: Reviewer, args: string[]) => [...args, "--model", configuredModel(reviewer)];
 // Keep the same read-tool permissions for probes, reviews and resumed sessions.
 const claudeReadTools = ["Read", "Glob", "Grep", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git rev-parse:*)", "Bash(git ls-remote:*)", "Bash(gh api --method GET:*)"];
@@ -103,9 +90,10 @@ export const runLauncher = (reviewer: Reviewer, phase: ReviewResult["phase"], pr
   ? runAgent([...withModel(reviewer, ["exec", "--json", "--sandbox", "read-only", ...(phase === "readiness" ? ["--ephemeral"] : []), "--cd", process.cwd()]), prompt], reviewer, phase, timeoutMs)
   : runAgent([...withModel(reviewer, ["-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "dontAsk", "--tools", "Read,Glob,Grep,Bash", "--allowedTools", claudeReadTools.join(",")]), prompt], reviewer, phase, timeoutMs);
 export const runInitialAgent = async (reviewer: Reviewer, timeoutMs = 600_000, scope?: ReviewScope) => {
+  recheckReviewer(reviewer);
   if (scope) { const { verifyScope } = await import("./scope.ts"); verifyScope(scope, scope.root || process.cwd()); }
   const result = await runLauncher(reviewer, "initial", agentPrompt(reviewer, scope), timeoutMs);
-  return { ...result, ...(scope ? { scope } : {}), severityMap: reviewer.severityMap };
+  return { ...result, ...(scope ? { scope } : {}), severityMap: reviewer.severityMap, reviewerPackage: reviewer.reviewerPackage };
 };
 
 export function debatePosition(transcript: string): DebatePosition {
@@ -119,7 +107,8 @@ export function debatePosition(transcript: string): DebatePosition {
   return { stance: "maintain", rationale: transcript || "No response supplied." };
 }
 export const runDebateAgent = (reviewer: Reviewer, sessionId: string, dispute: Finding[], opposing: DebatePosition | Finding | null, round: number, timeoutMs = 600_000, candidates: Finding[] = []) => {
-  const prompt = `Continue the same private pre-PR review session for debate round ${round}. Reconsider only this attributed finding: ${JSON.stringify(dispute)}. The other reviewer's latest attributed position is ${JSON.stringify(opposing)}. Do not modify files or interact with GitHub. Return one JSON object with stance (maintain, revise, accept, or agree_to_disagree), verdict (issue or no_issue), rationale, correctedFinding when applicable, and confidence. Keep the rationale concise and human-readable: explain the evidence, practical consequence, and what changed your position if applicable.${candidates.length ? ` These other initial findings share a location but may describe different failures: ${JSON.stringify(candidates)}. Also return sameConcernAs: an array of candidate IDs describing exactly this same failure, trigger, and consequence, or [] when none is established. Shared location or similar wording alone is not enough. Do not include your current finding IDs or invent IDs.` : ""}`;
+  recheckReviewer(reviewer);
+  const prompt = `Continue the same private pre-PR review session for debate round ${round}. Reconsider only this attributed finding: ${JSON.stringify(dispute)}. The other reviewer's latest attributed position is ${JSON.stringify(opposing)}. Do not modify files or interact with GitHub. Return one JSON object with stance (maintain, revise, accept, or agree_to_disagree), optional verdict (issue or no_issue only when supported; omit unknown), rationale, correctedFinding when applicable, and confidence. Keep the rationale concise and human-readable: explain the evidence, practical consequence, and what changed your position if applicable.${candidates.length ? ` These other initial findings share a location but may describe different failures: ${JSON.stringify(candidates)}. Also return sameConcernAs: an array of candidate IDs describing exactly this same failure, trigger, and consequence, or [] when none is established. Shared location or similar wording alone is not enough. Do not include your current finding IDs or invent IDs.` : ""}`;
   return reviewer.launcher === "codex"
     ? runAgent(withModel(reviewer, ["exec", "resume", "--json", sessionId, prompt]), reviewer, "debate", timeoutMs)
     : runAgent(withModel(reviewer, ["-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "dontAsk", "--tools", "Read,Glob,Grep,Bash", "--allowedTools", claudeReadTools.join(","), "--resume", sessionId, prompt]), reviewer, "debate", timeoutMs);
