@@ -114,7 +114,7 @@ function assertLocalState(root:string,run:Exec) {
   if(run(['git','ls-files','--',`${DIR}/drafts`,`${DIR}/accepted`,REGISTRY],root)) fail('Reviewer acceptance/private state is tracked. Ask the user to remediate; no index changes made.');
   statePath(root,REGISTRY);
 }
-function localScope(root:string,run:Exec,create=false) {
+export function localScope(root:string,run:Exec,create=false) {
   const path=resolve(root,run(['git','rev-parse','--git-path','prepr-reviewer-scope'],root));
   if(!existsSync(path) && create) {mkdirSync(dirname(path),{recursive:true});writeFileSync(path,randomUUID(),{mode:0o600,flag:'wx'});}
   return existsSync(path)?read(path):null;
@@ -203,7 +203,7 @@ export function resolveAccepted(reference:string, project=process.cwd(),run:Exec
   const packageRoot=staged?.package??statePath(root,`${DIR}/accepted/${entry.digest}`);
   if(packageHash(packageRoot)!==entry.packageHash || digest({format:FORMAT,package:entry.packageHash,source:entry.source,extraction:entry.extraction})!==entry.digest) fail('Accepted reviewer content changed; prepare and accept again.');
   const standard:Standard=json(join(packageRoot,'reviewer.json'));
-  return {skillPath:join(packageRoot,'SKILL.md'),reviewerPackage:{format:FORMAT,digest:entry.digest,packageHash:entry.packageHash,source:entry.source,acceptedAt:entry.acceptedAt},requiredAccess:standard.resources.filter(r=>r.kind==='runtime'&&r.required).map(r=>({tool:r.tool!,resource:r.resource!}))};
+  return {runtimeAccess:standard.resources.filter(r=>r.kind==='runtime').map(r=>({tool:r.tool!,resource:r.resource!,required:r.required})),skillPath:join(packageRoot,'SKILL.md'),reviewerPackage:{format:FORMAT,digest:entry.digest,packageHash:entry.packageHash,source:entry.source,acceptedAt:entry.acceptedAt},requiredAccess:standard.resources.filter(r=>r.kind==='runtime'&&r.required).map(r=>({tool:r.tool!,resource:r.resource!}))};
 }
 export function recheckReviewer(reviewer:{reference:string;skillPath:string;reviewerPackage?:any},project=process.cwd(),run:Exec=exec) {
   const current=resolveAccepted(reviewer.reference,project,run);

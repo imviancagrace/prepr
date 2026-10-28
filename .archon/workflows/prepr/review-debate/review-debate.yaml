@@ -62,7 +62,7 @@ nodes:
     with:
       reviewer: "$select-reviewers.output.reviewerA"
       scope: "$capture-diff.output.scope"
-      readiness_path: "$select-reviewers.output.readinessPath"
+      preparation_path: "$select-reviewers.output.preparationPath"
       reviewer_side: "a"
 
   - id: initial-reviewer-b
@@ -73,7 +73,7 @@ nodes:
     with:
       reviewer: "$select-reviewers.output.reviewerB"
       scope: "$capture-diff.output.scope"
-      readiness_path: "$select-reviewers.output.readinessPath"
+      preparation_path: "$select-reviewers.output.preparationPath"
       reviewer_side: "b"
 
   - id: comparison

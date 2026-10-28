@@ -1,4 +1,4 @@
-import {fixtureReviewer} from "./helpers/reviewers.ts";
+import {fixtureReviewer,fixturePrerequisites} from "./helpers/reviewers.ts";
 import {expect,test} from 'bun:test';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -29,12 +29,13 @@ test('controlled preparation, two reviews, mapped severity, duplicate reuse and 
   const inputs={reviewer_a:'',reviewer_b:'',reviewer_a_launcher:'',reviewer_b_launcher:'',reviewer_a_model:'',reviewer_b_model:''};
   const unprepared=await run(join(scripts,'select-reviewers.ts'),inputs);expect(unprepared.code).not.toBe(0);expect(unprepared.stderr).toContain('prepare-reviewer');expect(await Bun.file(log).exists()).toBe(false);
   fixtureReviewer(repo,join(fixture,'reviewer-a-skill'));fixtureReviewer(repo,join(fixture,'reviewer-b-skill'));
-  const failed=await run(join(scripts,'select-reviewers.ts'),inputs,{PREPR_TEST_FAIL:'1'});expect(failed.code).not.toBe(0);expect(failed.stderr).toContain('Neither code review');
-  expect((await Bun.file(log).text()).trim().split('\n').map(l=>JSON.parse(l)).every(x=>x.probe)).toBe(true);
+  const failed=await run(join(scripts,'select-reviewers.ts'),inputs);expect(failed.code).not.toBe(0);expect(failed.stderr).toContain('Neither code review');
+  expect(await Bun.file(log).exists()).toBe(false);
+  fixturePrerequisites(repo,[{name:'A',launcher:'codex',model:'fixture'},{name:'B',launcher:'claude',model:'fixture'}],{PREPR_CODEX_BIN:env.PREPR_CODEX_BIN,PREPR_CLAUDE_BIN:env.PREPR_CLAUDE_BIN});
   await Bun.write(log,'');
   const selection=await run(join(scripts,'select-reviewers.ts'),inputs);expect(selection.code).toBe(0);
   const selected=selection.output;
-  const [a,b]=await Promise.all(['A','B'].map(async side=>run(join(scripts,'run-initial.ts'),{reviewer:selected['reviewer'+side],scope:captured.output.scope,readiness_path:selected.readinessPath,reviewer_side:side.toLowerCase()})));
+  const [a,b]=await Promise.all(['A','B'].map(async side=>run(join(scripts,'run-initial.ts'),{reviewer:selected['reviewer'+side],scope:captured.output.scope,preparation_path:selected.preparationPath,reviewer_side:side.toLowerCase()})));
   expect(a.output.status).toBe('completed');expect(b.output.status).toBe('completed');
   const comparison=await run(join(scripts,'compare.ts'),{review_a:a.output,review_b:b.output});expect(comparison.output.disputes).toHaveLength(2);
   const debates=[];
@@ -44,7 +45,7 @@ test('controlled preparation, two reviews, mapped severity, duplicate reuse and 
   expect(delivery.output.report).toEqual({type:'archon_artifact',run_id:'acceptance',path:'prepr-report.md'});
   expect(delivery.output.data.path).toBe('prepr-report.json');
   const data=await Bun.file(join(artifacts,'prepr-report.json')).json(),text=await Bun.file(join(artifacts,'prepr-report.md')).text();
-  expect(data.initialReviews.a.reviewerPackage.format).toBe(1);expect(data.initialReviews.a.reviewerPackage.digest).toBeDefined();expect(data.confirmedBugs).toHaveLength(1);expect(data.preparation.readiness.a.status).toBe('ready');
+  expect(data.initialReviews.a.reviewerPackage.format).toBe(1);expect(data.initialReviews.a.reviewerPackage.digest).toBeDefined();expect(data.confirmedBugs).toHaveLength(1);expect(data.preparation.confirmation.status).toBe('user-confirmed');
   expect(text).toContain('Tests: not run');expect(text).toContain('Duplicate-date data remains unverified.');expect(text).not.toContain('## Disagreements');
   const calls=(await Bun.file(log).text()).trim().split('\n').map(l=>JSON.parse(l));expect(calls.filter(x=>!x.probe)).toHaveLength(4);
   expect(git('diff')).toBe(before);expect(git('status','--porcelain')).toBe(' M a.ts\n');

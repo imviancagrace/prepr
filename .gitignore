@@ -6,3 +6,5 @@ node_modules/
 .archon/prepr-reviewers/accepted/
 .archon/prepr-reviewers/registry.json
 .archon/prepr-reviewers/sources/
+
+.archon/prepr-prerequisites.json

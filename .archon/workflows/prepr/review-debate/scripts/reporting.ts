@@ -2,7 +2,7 @@ import { sameConcern, type Debate, type Finding, type ReviewResult, type DebateP
 import { sameLocation, severityConflict } from "../../.shared/findings.ts";
 
 import { reuseDiscussion } from "../../.shared/reuse.ts";
-import { verification, limitSentences, type Check } from "../../.shared/verification.ts";
+import { verification, limitSentences, type Verification } from "../../.shared/verification.ts";
 
 type Comparison = { runId?: string; reviewers: { a: string; b: string }; findings: unknown[]; agreements: Finding[][]; initialReviews?: { a: ReviewResult; b: ReviewResult } };
 export type PreprReport = {
@@ -16,8 +16,8 @@ export type PreprReport = {
   uncontestedFindings: (Debate & { initiallyRaisedBy?: string })[];
   debates: Debate[];
   concerns: Debate[];
-  verification: { a: { checks: Check[]; limitations: string[] }; b: { checks: Check[]; limitations: string[] } };
-  preparation: { scope?: ReviewResult["scope"]; readiness: { a?: ReviewResult["readiness"]; b?: ReviewResult["readiness"] } };
+  verification: { a: Verification; b: Verification };
+  preparation: { status?: string; checks?: any[]; confirmation?: any; limitations?: string[]; scope?: ReviewResult["scope"]; runtime?: {a?:ReviewResult["runtime"];b?:ReviewResult["runtime"]}; readiness: { a?: ReviewResult["readiness"]; b?: ReviewResult["readiness"] } };
 };
 
 function distinctConcerns(debates: Debate[]): Debate[] {
@@ -87,7 +87,7 @@ export const buildReport = (comparison: Comparison, debates: Debate[]): PreprRep
     debates: checkedDebates,
     concerns: all,
     verification: { a: verification(comparison.initialReviews?.a), b: verification(comparison.initialReviews?.b) },
-    preparation: { scope: comparison.initialReviews?.a.scope, readiness: { a: comparison.initialReviews?.a.readiness, b: comparison.initialReviews?.b.readiness } },
+    preparation: { ...comparison.initialReviews?.a.preparation, scope: comparison.initialReviews?.a.scope, runtime:{a:comparison.initialReviews?.a.runtime,b:comparison.initialReviews?.b.runtime}, readiness: { a: comparison.initialReviews?.a.readiness, b: comparison.initialReviews?.b.readiness } },
   };
 };
 
@@ -119,6 +119,17 @@ const outcome = (debate: Debate) => debate.conclusion === "converged-on-issue" ?
   : debate.stopReason === "agree_to_disagree" ? "Both reviewers chose to leave their differing conclusions unresolved."
   : "The reviewers did not reach a shared conclusion.";
 const bullet = (label: string, text: string) => `- **${label}:** ${text}`;
+const assessmentText = (value: unknown): string => {
+  if (Array.isArray(value)) return value.map(assessmentText).join('; ');
+  if (value && typeof value === 'object') return Object.entries(value).map(([key, entry]) => `${key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()}: ${assessmentText(entry)}`).join('; ');
+  return String(value);
+};
+const verificationBullets = (side: string, supplied: Verification) => [
+  ...(supplied.overview ? [bullet(`${side} — Review assessment`, readable(supplied.overview))] : []),
+  ...supplied.checks.map(check => bullet(`${side} — ${check.name}: ${check.status}`, `${readable(check.evidence)}${check.snapshot ? ` (snapshot ${check.snapshot})` : ""}`)),
+  ...supplied.limitations.map(limit => bullet(`${side} limitation`, readable(limit))),
+  ...(supplied.assessments !== undefined ? [bullet(`${side} — Additional assessments`, readable(assessmentText(supplied.assessments)))] : []),
+];
 const positionText = (position: DebatePosition, initial?: Finding) => {
   const before = rationale(initial), after = short(position.rationale, 35);
   return before === after ? before : `${before} Latest reasoning: ${after}`;
@@ -185,14 +196,31 @@ export const markdownReport = (report: PreprReport): string => {
   }
   const unresolved = Object.values(sections).flat().filter(d => d.conclusion === "unresolved").length;
   const issues = Object.values(sections).flat().filter(d => d.conclusion === "converged-on-issue").length;
-  const assessment = !seen.length ? "No actionable concerns were identified."
+  const incomplete=report.preparation.status==='failed'||report.concerns.some(d=>d.stopReason==='incomplete')||[report.initialReviews?.a,report.initialReviews?.b].some(r=>r&&r.status!=='completed');
+  const qualified = Object.values(report.verification).some(v=>v.overview || v.limitations.length);
+  const assessment = incomplete ? "Review incomplete; the available evidence does not establish a complete review." : !seen.length ? qualified ? "No actionable concerns were identified within the reviewed portions; see the attributed assessments and limitations below." : "No actionable concerns were identified."
     : !issues && !unresolved ? "All raised concerns were dismissed; none remain unresolved."
     : `${issues} concern${issues === 1 ? "" : "s"} supported by both reviewers; ${unresolved} ${unresolved === 1 ? "remains" : "remain"} unresolved. ${unresolved ? "Review the differing evidence before deciding your next steps." : "Use the reasoning below to decide which concerns warrant action."}`;
-  const checks = (["a", "b"] as const).flatMap(side => {
-    const supplied = report.verification[side];
-    return supplied.checks.map(check => bullet(`${side.toUpperCase()} — ${check.name}: ${check.status}`, `${check.evidence}${check.snapshot ? ` (snapshot ${check.snapshot})` : ""}`)).concat(supplied.limitations.map(limit => bullet(`${side.toUpperCase()} limitation`, limit)));
-  });
+  const checks = (["a", "b"] as const).flatMap(side => verificationBullets(side.toUpperCase(), report.verification[side]));
+  checks.unshift(...(report.preparation.checks??[]).map(c=>bullet(`Static check — ${c.name}: ${c.status}`,c.evidence)),...(report.preparation.confirmation?[bullet('Launcher/model prerequisites: user-confirmed','User reported login/model access; confirmation is not observed runtime authentication or resource access.')]:[]),...(report.preparation.limitations??[]).map(l=>bullet('Preparation limitation',l)));
   return [`# Prepr report`, assessment, `**Verification and limitations**\n\n${checks.join("\n")}`, `Reviewers: A — ${report.reviewers.a}; B — ${report.reviewers.b}.`,
     ...Object.entries(sections).filter(([, items]) => items.length).map(([title, items]) => `## ${title}\n\n${items.map(debate => entry(debate, title === "Disagreements")).join("\n\n")}`),
   ].join("\n\n");
 };
+
+export function incompleteReport(evidence:{scope?:unknown;preparation?:any;initialReviews:{a?:ReviewResult;b?:ReviewResult};missing:string[]}) {
+  const failures:{stage:string;side?:string;launcher?:string;model?:string;evidence:string;recovery:string}[]=[];
+  if(evidence.preparation?.status==='failed')failures.push({stage:evidence.preparation.stage||'static validation',evidence:evidence.preparation.error||'Static validation failed.',recovery:evidence.preparation.recovery||'Run prepr-setup to inspect configuration.'});
+  for(const side of ['a','b'] as const) {
+    const result=evidence.initialReviews[side];
+    if(result&&result.status!=='completed')failures.push({stage:'initial review',side,launcher:result.runtime?.launcher,model:result.runtime?.model,evidence:result.stderr||result.stdout||`Reviewer execution ${result.status}; no diagnostic supplied.`,recovery:'Check the selected launcher login and model configuration, required resource access, or slow startup hooks/plugins; rerun after resolving the failure. No account, model or permissions were changed.'});
+  }
+  if(!failures.length)failures.push({stage:'before comparison',evidence:'No usable completed comparison is available; the cause is unknown.',recovery:'Inspect the upstream Archon node errors and rerun after resolving the failure.'});
+  return {status:'incomplete' as const,failures,initialReviews:evidence.initialReviews,preparation:{...evidence.preparation,scope:evidence.scope},verification:{a:verification(evidence.initialReviews.a),b:verification(evidence.initialReviews.b)},limitations:evidence.missing,findingsAvailable:false};
+}
+export function incompleteMarkdown(report:ReturnType<typeof incompleteReport>) {
+  const started=report.preparation.initialReviewsStarted===false?'Neither initial review started.':'Available reviewer results are retained; two completed reviews have not been established.';
+  const failures=report.failures.map(f=>`- **${f.side?`Reviewer ${f.side.toUpperCase()} — `:''}${f.stage}${f.launcher?` (${f.launcher}, ${f.model})`:''}:** ${f.evidence}\n  Recovery: ${f.recovery}`);
+  const checks=(['a','b'] as const).flatMap(side=>verificationBullets(side.toUpperCase(),report.verification[side]));
+  return ['# Prepr report','Review incomplete. '+started,'**Verification and limitations**',...failures,...checks,...report.limitations.map(l=>`- ${l}`),report.preparation.confirmation?'Launcher/model confirmation was user attestation; it does not prove current authentication or resource access.':'Prerequisite confirmation evidence unavailable or incomplete.','No completed comparison is available; no shared review conclusion or successful empty review is claimed.'].join('\n\n');
+}

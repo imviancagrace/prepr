@@ -80,7 +80,7 @@ test("meaningful dismissals appear briefly without empty sections", () => {
 test("same-skill clean prose yields only a concise assessment and preserves raw evidence", async () => {
   const text = "Vee questions:\nNone.\nVee verdict: Ready.\nDefault review:\nNo findings.";
   const comparison = compare(findings("reviewer-a", text), findings("reviewer-b", text));
-  const data = buildReport({ reviewers: { a: "Vee", b: "Vee" }, ...comparison, initialReviews: { a: { stdout: text } as never, b: { stdout: text } as never } }, []);
+  const data = buildReport({ reviewers: { a: "Vee", b: "Vee" }, ...comparison, initialReviews: { a: { stdout: text, status: "completed" } as never, b: { stdout: text, status: "completed" } as never } }, []);
   expect(markdownReport(data)).toContain("No actionable concerns were identified.");
   expect(markdownReport(data)).not.toContain("## ");
   expect(data.initialReviews?.a.stdout).toBe(text);

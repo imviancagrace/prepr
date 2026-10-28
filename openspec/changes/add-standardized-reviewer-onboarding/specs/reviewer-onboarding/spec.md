@@ -19,7 +19,14 @@ The system SHALL define a versioned reviewer format covering review priorities, 
 ### Requirement: Faithful extraction into a separate package
 The system SHALL provide `prepr-prepare-reviewer`, invocable independently or inline during reviewer setup. Preparation MUST inspect the selected source and relevant referenced material as data and produce a separate candidate without modifying the original. It MUST retain review priorities, reasoning methods, evidence thresholds, domain rules, communication style, and native severity meanings. It MUST exclude unrelated activation, scope discovery, checkout mutation, installation, scheduling, publication, and extra-agent orchestration. It MUST NOT execute those source instructions during extraction.
 
+During setup, preparation MUST run inline automatically for raw or changed selections; users provide local paths or supported immutable GitHub references and MUST NOT be required to run a separate preparation command or manually move skills. The standalone skill remains available for independent onboarding. Preparation MUST create the candidate package under the target project’s `.archon/prepr-reviewers/drafts/<id>/package/` with `SKILL.md`, `reviewer.json`, and retained references. After explicit acceptance, activation MUST save the exact package under `.archon/prepr-reviewers/accepted/<digest>/` and record it in the local registry. Private drafts, accepted copies, and acceptance state MUST be excluded from new Git tracking.
+
 The candidate MUST include an attributed summary of retained instructions, excluded instructions with reasons, and unresolved ambiguities or dependencies. It MUST NOT invent missing standards, silently replace the reviewer's priorities, or claim that automated validation proves semantic fidelity. Material ambiguities MUST be resolved before acceptance.
+
+#### Scenario: Setup receives a raw reviewer path
+- **WHEN** a user supplies a local or pinned GitHub source during setup and it has no current accepted adaptation
+- **THEN** setup prepares and saves the candidate automatically, then presents its concrete acceptance preview
+- **AND** no separate transformation command is required and the original source remains unchanged
 
 #### Scenario: Source includes its own PR workflow
 - **WHEN** a reviewer combines code-review criteria with PR discovery, checkout changes, and publication instructions
@@ -80,6 +87,18 @@ The system SHALL retain source identity, immutable remote revision when applicab
 ### Requirement: Shared output preserves reviewer meaning
 Standardized reviewers SHALL return a shared structured initial result with an overview, verification evidence/limitations, and findings carrying actionable content, source locations when known, native severity when supplied, and explicit issue assessment only when supported. The contract MUST preserve question-led wording and distinguish questions or hypotheses from asserted issues. It MUST NOT force an unknown issue verdict to `issue`, assign guessed severity mappings, or discard reviewer-specific substantive assessments such as evidenced spec alignment. Debate responses MUST retain the existing stance, rationale, confidence, corrected-finding, verdict, and explicit duplicate-confirmation semantics.
 
+Consumer normalization MUST preserve nested `verification.checks` and `verification.limitations`, including checks supplied as strings or structured objects, alongside supported historical verification arrays and prose. Explicit statuses and their evidence MUST remain attributed to the originating reviewer and snapshot when known; ambiguous statuses MUST remain unknown. Material overview qualifications, nested limitations, and reviewer-specific assessments, including reasons an assessment or alignment score was not established, MUST survive into normalized report evidence. Consumer support for these existing version-1 forms MUST NOT require changes to accepted reviewer content, fingerprints, or acceptance records.
+
+#### Scenario: Reviewer supplies nested verification evidence
+- **WHEN** the final reviewer result contains `verification.checks` and `verification.limitations`, including string checks or structured check objects
+- **THEN** normalization preserves the supplied checks, explicit statuses, evidence and limitations with reviewer attribution
+- **AND** it does not replace passing focused checks with a blanket unknown/not-run result because the full suite was unverified
+
+#### Scenario: Reviewer qualifies coverage or omits an unsupported score
+- **WHEN** a reviewer reports partial coverage or explains why a substantive assessment such as spec alignment cannot be scored
+- **THEN** normalized report evidence preserves that qualification and explanation without inventing a score, complete coverage, or a finding
+- **AND** interpreting this existing output leaves accepted reviewer versions and their approval records unchanged
+
 #### Scenario: Reviewer raises an unresolved question
 - **WHEN** the reviewer identifies a supported question without asserting a defect
 - **THEN** output preserves the question and rationale without manufacturing an issue verdict or a confirmed bug
@@ -89,17 +108,18 @@ Standardized reviewers SHALL return a shared structured initial result with an o
 - **THEN** the shared structure preserves that text and those labels while existing explicit profile mappings alone govern severity comparison
 
 ### Requirement: Runtime enforcement and evidence
-Before either normal reviewer or readiness model probe starts, the system SHALL verify that both selections resolve to current, locally accepted supported packages. This requirement MUST apply to named profiles, project defaults, direct references, and bundled reviewers. Missing, stale, rejected, or invalid packages MUST stop the run with side-specific preparation guidance. A normal run MUST NOT convert, activate, rewrite reviewer configuration, or prompt for acceptance. Scope-only preview MUST bypass reviewer onboarding and remain free of conversion and model sessions.
+Before either normal reviewer starts, the system SHALL verify that both selections resolve to current, locally accepted supported packages. This requirement MUST apply to named profiles, project defaults, direct references, and bundled reviewers. Missing, stale, rejected, or invalid packages MUST stop the run with side-specific preparation guidance. A normal run MUST NOT convert, activate, rewrite reviewer configuration, or prompt for acceptance. Scope-only preview MUST bypass reviewer onboarding and remain free of conversion and model sessions.
 
 Review sessions MUST receive only accepted effective review instructions and approved retained review references, together with Prepr's scope and structural output/debate contract; raw source workflow instructions MUST NOT be reloaded as reviewer instructions. Complete JSON evidence MUST identify each effective reviewer version and its source/acceptance provenance without exposing credentials. Existing report names and artifact delivery MUST remain unchanged.
 
 #### Scenario: One raw reviewer is selected directly
 - **WHEN** either side selects a source with no current accepted standardized package
-- **THEN** neither initial review nor readiness model probe starts and the affected side receives preparation guidance
+- **THEN** neither initial review starts and the affected side receives preparation guidance
 
 #### Scenario: Both reviewers are accepted
 - **WHEN** both selections resolve to unchanged accepted packages
-- **THEN** normal readiness and independent reviews continue without another human gate
+- **THEN** static runtime validation and independent reviews continue without another reviewer-acceptance gate when matching prerequisite confirmation is also present
+- **AND** no separate readiness AI session starts
 
 #### Scenario: User requests scope-only preview
 - **WHEN** preview-only scope capture is selected

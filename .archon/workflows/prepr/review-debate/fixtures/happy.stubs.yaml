@@ -4,10 +4,9 @@ fixture:
     reviewer_a: "fixture-a"
     reviewer_b: "fixture-b"
 select-reviewers:
-  readinessPath: ""
-  readiness:
-    a: {status: ready}
-    b: {status: ready}
+  preparationPath: ""
+  preparation:
+    status: passed
   reviewerA:
     name: "fixture-a"
     reference: "fixture-a"

@@ -49,13 +49,15 @@ After obtaining user choices, write this temporary JSON request outside the proj
 Use exact `configHash` and `current` values returned by `plan` for `expectedConfigHash` and `expectedWorkflow`; these reject changes since inspection. `workflow` must be `keep` or `replace`; `config` must be `keep` or `new`. Keep requires an existing installation/config. A differing workflow replacement needs separate consent. Omit `configFile` for keep. New YAML merges unrelated profiles/settings; the agent must resolve profile ID collisions before submission.
 
 ```sh
+bun /path/to/prepr-setup/scripts/setup.ts preview /temporary/request.json
+# Show the preview and obtain explicit prerequisite confirmation before apply.
 bun /path/to/prepr-setup/scripts/setup.ts apply /temporary/request.json
 bun /path/to/prepr-setup/scripts/setup.ts verify /absolute/project /returned/staging/source
 ```
 
 No workflow/model process starts. Errors yield `status: incomplete`; report that error, don't mark setup complete or work around it by running Prepr. Verify hashes and mode bits against the local provenance record. Backups are stored at `.archon/prepr-backups/<id>/`, with numbered files corresponding to ordered replacements; each backup includes a mapping of original paths. Restore only the requested prior paths, preserving newer user changes. Local state is excluded through the project's Git info/exclude without index changes. Tracked profile input blocks before writes and needs a user remediation decision.
 
-`apply` and `verify` return static assessment, source revision (or null for unknown retained content), project/config paths, and four commands. Display them as instructions. Remove temporary source, YAML, and request files after use; don't remove project backups or change installed tools automatically.
+`apply` and `verify` return static assessment, source revision (or null for unknown retained content), project/config paths, and five commands (four review/preview commands plus optional `archon serve`). Display them as instructions. Remove temporary source, YAML, and request files after use; don't remove project backups or change installed tools automatically.
 
 For deterministic execution of an already approved prerequisite plan after Bun exists, `install <plan.json> <approved-plan.json>` accepts two arrays of `{ "tool": "tool-name", "command": ["executable", "arg"] }`. Only pass an approved snapshot after explicit conversational permission; matching files alone are not human permission. The helper rejects changed plans, executes exact argument arrays, and checks version-command success; run `inspect` afterward to establish compatible versions. Install scripts and command arrays must come from the approved official method, never reviewer content. Bootstrap Git/Bun with approved shell commands first. Login is an interactive user handoff, not an installer/model call.
 
@@ -65,3 +67,18 @@ Pass the fetched source to `verify` when retaining an older workflow. This reuse
 
 
 Before apply, check or prepare each selected reviewer using the preparation skill bundled in the fetched remote checkout. Structural validity alone is insufficient. `acceptances` contains only candidate id/digest/accept decisions actually authorized by the human after preview. Setup stages these records with the profile/workflow transaction; failed replacement restores prior active mappings. Omitting acceptances is valid only when all selected packages are already accepted and unchanged. `keep` never bypasses this validation. The local Git metadata scope marker and ignored registry bind acceptance to this project; imported records are not proof of local consent. Setup does not start an Archon workflow or separate model session.
+
+
+## Prerequisite confirmation
+
+Run `preview <request.json>` after concrete reviewer acceptance and configuration choices. It validates static prerequisites and shows effective launcher/model `selections` and `confirmation.digest` without an AI session or active-state writes. If status is `confirmation-required`, show its check results and named selections, ask the human to confirm they are logged in and can use those models, and wait. Only that explicit answer authorizes adding:
+
+```json
+"confirmation": {"digest": "SHOWN_CONFIRMATION_DIGEST", "decision": "confirm"}
+```
+
+Then `apply` recomputes selections and rejects a changed digest. It stages `.archon/prepr-prerequisites.json` with profile, reviewer registry and workflow changes in the same rollback transaction. Matching existing local confirmation can be reused by omitting `confirmation`. A decline/unanswered response leaves prior active state unchanged. State binds the canonical project and local Git scope marker, launcher executable identities and effective models; imported or stale records do not qualify. No credential content is saved. The file is Git-excluded and kept profile bytes are preserved. If already tracked, obtain explicit remediation; no automatic index changes.
+
+Explicit pins and resolved Archon tiers participate in confirmation. Runtime direct overrides must match confirmed launcher/model selections; otherwise rerun setup to confirm them. Unchanged reviewer standards do not need renewed reviewer acceptance for a launcher/model change. Actual sessions establish login/model/resource access; static checks and user confirmation never prove it. Setup and normal runs never start AI readiness probes. Existing installations without confirmation rerun setup, reusing their unchanged accepted reviewer packages.
+
+The fifth returned command starts the optional web UI: `archon serve`. `ui` describes foreground execution in a separate terminal, default port 3090, and binary-install first-use asset download. Display these instructions without executing the command or fetching assets. Existing review/preview commands stay independent of the server. The UI is optional for CLI review; source installations may need Archon's documented UI build step.

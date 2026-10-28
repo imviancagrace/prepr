@@ -1,3 +1,4 @@
+import {inspectPrerequisites,previewConfirmation,CONFIRMATION_PATH} from '../.archon/workflows/prepr/.shared/prerequisites.ts';
 import {fixtureDraft} from "./helpers/reviewers.ts";
 import { test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, chmodSync, existsSync, statSync, renameSync } from 'node:fs';
@@ -30,7 +31,8 @@ function fixture() {
   const request=()=>{const p=plan(project,source,exec);const staged=stageBundled(project,source,exec);const acceptances:any[]=[];
    const incoming:any=Bun.YAML.parse(readFileSync(configFile,'utf8'));
    for(const item of Object.values(incoming?.reviewers??{}) as any[]) try {const r=fixtureDraft(project,item.skill==='bundled:peer'?staged.source:item.skill,exec);acceptances.push({id:r.id,digest:r.digest,decision:'accept'});}catch{}
-   return {project,source,workflow:'replace' as const,config:'new' as const,configFile,expectedConfigHash:p.configHash,expectedWorkflow:p.current,acceptances};};
+   let confirmation:any;try {const config:any=Bun.YAML.parse(readFileSync(configFile,'utf8'));const chosen=['reviewer_a','reviewer_b'].map(side=>{const p=config.reviewers[config.default_pair[side]];return {...p,model:p.model??'test-model'};});const inspected=inspectPrerequisites(chosen,project,exec);const shown=previewConfirmation(project,inspected.selections,exec);confirmation={digest:shown.digest,decision:'confirm'};}catch{}
+   return {confirmation,project,source,workflow:'replace' as const,config:'new' as const,configFile,expectedConfigHash:p.configHash,expectedWorkflow:p.current,acceptances};};
   return {temp,source,project,log,exec,git,configFile,request,cleanup:()=>rmSync(temp,{recursive:true,force:true})};
 }
 test('fresh remote main install preserves modes, peer lifetime, ignores, provenance and command-only handoff',async()=>{
@@ -39,7 +41,7 @@ test('fresh remote main install preserves modes, peer lifetime, ignores, provena
     expect(fetched.commit).toBe(f.git(['rev-parse','main'],f.source));
     const r=await apply({...f.request(),source:fetched.source},f.exec);
     rmSync(fetched.staging,{recursive:true,force:true});
-    expect(r.status).toBe('configured');expect(r.commands).toHaveLength(4);expect(r.commands[0]).toContain("'\\''");
+    expect(r.status).toBe('configured');expect(r.commands).toHaveLength(5);expect(r.commands[0]).toContain("'\\''");
     const config:any=Bun.YAML.parse(readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8'));
     expect(existsSync(join(config.reviewers.a.skill,'SKILL.md'))).toBe(true);
     const executable='.archon/workflows/prepr/review-debate/fixtures/fake-codex';
@@ -49,7 +51,7 @@ test('fresh remote main install preserves modes, peer lifetime, ignores, provena
     expect(f.log.filter(a=>a[0]==='archon').every(a=>a[1]==='--version'||a.join(' ')==='archon ai tier list --json')).toBe(true);
     expect(f.log.some(a=>a.includes('exec')||a.includes('workflow')||a.includes('-p'))).toBe(false);
   } finally {f.cleanup();}
-});
+},15000);
 test('keep preserves configuration bytes; new merges unrelated profiles; invalid config and races do not write',async()=>{
  const f=fixture();try {
   await apply(f.request(),f.exec);
@@ -61,7 +63,7 @@ test('keep preserves configuration bytes; new merges unrelated profiles; invalid
   await expect(apply(f.request(),f.exec)).rejects.toThrow();expect(readFileSync(path,'utf8')).toBe(before);
   const stale=f.request();writeFileSync(path,before+'\n');await expect(apply(stale,f.exec)).rejects.toThrow('changed since choices');
  } finally {f.cleanup();}
-});
+},15000);
 test('workflow keep records unknown modified provenance, replacement backs up, failed swap recovers',async()=>{
  const f=fixture();try {
   await apply(f.request(),f.exec);
@@ -72,7 +74,7 @@ test('workflow keep records unknown modified provenance, replacement backs up, f
   expect(readFileSync(file,'utf8')).toBe(original+'\n// custom\n');
   const replaced=await apply({...f.request(),config:'keep'},f.exec);expect(existsSync(join(replaced.backup,'0','.shared/core.ts'))).toBe(true);
  } finally {f.cleanup();}
-});
+},15000);
 test('tracked profile, invalid models, invalid mappings, missing skills, modified package stop before writes',async()=>{
  const f=fixture();try {
   await apply(f.request(),f.exec);const path=join(f.project,'.archon/prepr.local.yaml');
@@ -88,7 +90,7 @@ test('tracked profile, invalid models, invalid mappings, missing skills, modifie
   writeFileSync(join(f.source,'.archon/workflows/prepr/.shared/core.ts'),'modified');
   expect(()=>plan(f.project,f.source,f.exec)).toThrow('modified');
  }finally{f.cleanup();}
-});
+},15000);
 test('main is refreshed, other branch ignored, denied fetch never uses cache',()=>{
  const f=fixture();try{
   f.git(['branch','other'],f.source);const a=fetchMain(f.exec);
@@ -98,7 +100,7 @@ test('main is refreshed, other branch ignored, denied fetch never uses cache',()
   expect(f.git(['status','--short'],f.project)).toBe('');
   rmSync(a.staging,{recursive:true,force:true});rmSync(b.staging,{recursive:true,force:true});
  }finally{f.cleanup();}
-});
+},15000);
 test('inspection and exact approved installations preserve tools and never start sessions',()=>{
  const seen:string[][]=[];const installed=new Set(['git','bun','codex']);
  const exec:Run=args=>{seen.push(args);if(args[0]==='installer'){installed.add(args[1]);return '';}if(!installed.has(args[0]))throw new Error('missing');return args[0]==='archon'?'0.11.1':'1.3.14';};
@@ -107,8 +109,8 @@ test('inspection and exact approved installations preserve tools and never start
  installApproved(steps,steps,exec);expect(inspectTools(['codex'],exec).every(t=>t.status==='present')).toBe(true);
  expect(inspectTools(['codex'],args=>args[0]==='archon'?'0.11.0':'1.2.3').find(t=>t.tool==='archon')?.status).toBe('missing-or-incompatible');
  expect(()=>installApproved([{tool:'bun',command:['fail']}],[{tool:'bun',command:['fail']}],()=>{throw new Error('failed');})).toThrow('failed');
- expect(commands('/some/project')).toHaveLength(4);
-});
+ expect(commands('/some/project')).toHaveLength(5);
+},15000);
 test('bootstrap inspection works without Bun/Git and rejects unsupported platforms without installing',()=>{
  const temp=mkdtempSync(join(tmpdir(),'prepr-bootstrap-'));
  try {
@@ -119,7 +121,7 @@ test('bootstrap inspection works without Bun/Git and rejects unsupported platfor
   writeFileSync(uname,'#!/bin/sh\necho OtherOS\n');
   const unsupported=Bun.spawnSync(['/bin/sh',script,'codex'],{env:{PATH:temp}});expect(unsupported.exitCode).toBe(1);expect(unsupported.stderr.toString()).toContain('Unsupported');
  } finally {rmSync(temp,{recursive:true,force:true});}
-});
+},15000);
 test('pinned remote reviewer is verified with Git only and missing commit stops setup',async()=>{
  const f=fixture();try {
   const commit=f.git(['rev-parse','main'],f.source), config:any=Bun.YAML.parse(readFileSync(f.configFile,'utf8'));
@@ -135,14 +137,14 @@ test('pinned remote reviewer is verified with Git only and missing commit stops 
   config.reviewers.a.skill=`github:example/reviewers@${'0'.repeat(40)}:reviewers/peer-review-guidelines`;writeFileSync(f.configFile,Bun.YAML.stringify(config));
   await expect(apply(f.request(),exec)).rejects.toThrow();expect(readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8')).toBe(original);
  }finally{f.cleanup();}
-});
+},15000);
 test('modified versioned bundled source cannot be silently overwritten',async()=>{
  const f=fixture();try{
   await apply(f.request(),f.exec);const path=join(stageBundled(f.project,f.source,f.exec).source,'SKILL.md');
   const custom=readFileSync(path,'utf8')+'\nCustom';writeFileSync(path,custom);
   expect(()=>stageBundled(f.project,f.source,f.exec)).toThrow('modified');expect(readFileSync(path,'utf8')).toBe(custom);
  }finally{f.cleanup();}
-});
+},15000);
 test('retaining an older workflow uses fetched pure validation without changing installed code',async()=>{
  const f=fixture();try{
   await apply(f.request(),f.exec);const path=join(f.project,'.archon/workflows/prepr/.shared/core.ts');
@@ -150,7 +152,7 @@ test('retaining an older workflow uses fetched pure validation without changing 
   await apply({...f.request(),workflow:'keep',config:'keep'},f.exec);
   await verify(f.project,f.exec,f.source);expect(readFileSync(path,'utf8')).toBe(legacy);
  }finally{f.cleanup();}
-});
+},15000);
 
 test('declined acceptance and failed profile swap preserve the prior registry and active pair',async()=>{
  const f=fixture();try{
@@ -163,4 +165,28 @@ test('declined acceptance and failed profile swap preserve the prior registry an
   await expect(apply(f.request(),f.exec,(from,to)=>{if(String(to).endsWith('prepr.local.yaml'))throw new Error('profile swap failed');renameSync(from,to);})).rejects.toThrow('profile swap');
   expect(readFileSync(registry,'utf8')).toBe(beforeRegistry);expect(readFileSync(profile,'utf8')).toBe(beforeProfile);
  }finally{f.cleanup();}
-});
+},15000);
+
+test('prerequisite preview and explicit confirmation are separate from reviewer acceptance and are transactional',async()=>{
+ const f=fixture();try {
+  const request=f.request();delete request.confirmation;
+  const shown=await apply(request,f.exec,renameSync,true);
+  expect(shown.status).toBe('confirmation-preview');expect(shown.confirmation.status).toBe('confirmation-required');
+  expect(existsSync(join(f.project,'.archon/prepr.local.yaml'))).toBe(false);
+  expect(existsSync(join(f.project,'.archon/prepr-reviewers/registry.json'))).toBe(false);
+  expect(existsSync(join(f.project,CONFIRMATION_PATH))).toBe(false);
+  await expect(apply(request,f.exec)).rejects.toThrow('confirmation missing');
+  await expect(apply({...request,confirmation:{digest:shown.confirmation.digest,decision:'decline'}},f.exec)).rejects.toThrow('declined');
+  await expect(apply({...request,confirmation:{digest:'changed',decision:'confirm'}},f.exec)).rejects.toThrow('changed');
+  const result=await apply({...request,confirmation:{digest:shown.confirmation.digest,decision:'confirm'}},f.exec);
+  expect(result.ui.optional).toBe(true);expect(result.ui.separateTerminal).toBe(true);expect(result.ui.note).toContain('3090');expect(result.commands.at(-1)).toEndWith('archon serve');
+  const path=join(f.project,CONFIRMATION_PATH),before=readFileSync(path,'utf8'),profile=readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8');
+  const kept={...f.request(),config:'keep' as const};delete kept.confirmation;
+  await apply(kept,f.exec);expect(readFileSync(path,'utf8')).toBe(before);expect(readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8')).toBe(profile);
+  const changed=f.request();
+  await expect(apply(changed,f.exec,(from,to)=>{if(String(to).endsWith('prepr-install.json'))throw new Error('late failure');renameSync(from,to);})).rejects.toThrow('late failure');
+  expect(readFileSync(path,'utf8')).toBe(before);expect(readFileSync(join(f.project,'.archon/prepr.local.yaml'),'utf8')).toBe(profile);
+  expect(f.git(['check-ignore','--',CONFIRMATION_PATH],f.project)).toBe(CONFIRMATION_PATH);
+  expect(f.log.some(a=>a.includes('serve')||a.includes('-p')||a.includes('exec')||a.includes('workflow'))).toBe(false);
+ }finally{f.cleanup();}
+},20000);

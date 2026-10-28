@@ -113,7 +113,7 @@ export function installApproved(steps: InstallStep[], approved: InstallStep[], e
 }
 const unverified = ['Launcher authentication and model entitlement have not been probed.', 'Reviewer sandbox/resource access and project tests have not been verified.'];
 export function commands(root: string) {
-  return ['',' --input scope=branch',' --input preview_only=true',' --input scope=branch --input preview_only=true'].map(flags => `cd ${quote(root)} && archon workflow run prepr --no-worktree${flags}`);
+  return [...['',' --input scope=branch',' --input preview_only=true',' --input scope=branch --input preview_only=true'].map(flags => `cd ${quote(root)} && archon workflow run prepr --no-worktree${flags}`), `cd ${quote(root)} && archon serve`];
 }
 async function skillExists(reference: string, root: string, exec: Run) {
   const github = reference.match(/^(?:github:|https:\/\/github\.com\/)([\w.-]+\/[\w.-]+)@([a-f0-9]{40})(?::|#)(.+)$/i);
@@ -146,31 +146,15 @@ export async function validateConfig(config: any, root: string, packageRoot: str
       await skillExists(bundledSource,root,exec);
     } else await skillExists(p.skill,root,exec);
   }
-  let tiers: any;
-  for (const reviewer of [reviewerA,reviewerB]) if (!reviewer.model) {
-    tiers ??= JSON.parse(exec(['archon','ai','tier','list','--json'],root));
-    const effective = tiers.tiers?.find((t: any) => t.tier === 'large')?.effective;
-    if (effective?.provider !== reviewer.launcher || !effective.model) throw new Error(`Pin a compatible ${reviewer.launcher} model or configure its matching Archon large tier yourself.`);
-  }
   const onboarding = await import(pathToFileURL(join(packageRoot,'.shared/reviewers.ts')).href);
   const accepted = [reviewerA,reviewerB].map(reviewer => onboarding.resolveAccepted(reviewer.reference === 'bundled:peer' ? bundledSource! : reviewer.reference,root,exec,pending));
-  const launchers = [reviewerA.launcher,reviewerB.launcher];
-  const tools = inspectTools(launchers,exec);
-  const declared = [...(config.reviewers[config.default_pair.reviewer_a].required_access ?? []),...(config.reviewers[config.default_pair.reviewer_b].required_access ?? []),...accepted.flatMap(r=>r.requiredAccess)];
-  for (const access of declared) {
-    if (!['file','git','gh'].includes(access.tool)) throw new Error(`Unsupported required tool: ${access.tool}`);
-    if (access.tool === 'gh' && !tools.some(t => t.tool === 'gh')) {
-      try { tools.push({tool:'gh',status:'present',version:exec(['gh','--version'])}); }
-      catch { tools.push({tool:'gh',status:'missing-or-incompatible'}); }
-    }
-  }
-  const missing = tools.filter(t => t.status !== 'present');
-  if (missing.length) throw new Error(`Missing/incompatible prerequisites: ${missing.map(t=>t.tool).join(', ')}. Obtain permission before installing.`);
-  return { tools, unverified, reviewers: accepted.map(r=>r.reviewerPackage) };
+  const prerequisites = await import(pathToFileURL(join(packageRoot,'.shared/prerequisites.ts')).href);
+  const inspected=prerequisites.inspectPrerequisites([reviewerA,reviewerB].map((r,i)=>({...r,...accepted[i],requiredAccess:[...(r.requiredAccess??[]),...accepted[i].requiredAccess]})),root,exec);
+  return { tools:inspected.tools, checks:inspected.checks, selections:inspected.selections, unverified, reviewers: accepted.map(r=>r.reviewerPackage) };
 }
 
-type Request = { project: string; source: string; workflow: 'keep'|'replace'; config: 'keep'|'new'; configFile?: string; expectedConfigHash: string|null; expectedWorkflow: Record<string,string>; peer?: 'keep'|'replace'; expectedPeer?: Record<string,string>; acceptances?: {id:string;digest:string;decision:'accept'}[] };
-export async function apply(request: Request, exec: Run = run, replace = renameSync) {
+type Request = { project: string; source: string; workflow: 'keep'|'replace'; config: 'keep'|'new'; configFile?: string; expectedConfigHash: string|null; expectedWorkflow: Record<string,string>; peer?: 'keep'|'replace'; expectedPeer?: Record<string,string>; acceptances?: {id:string;digest:string;decision:'accept'}[]; confirmation?: {digest:string;decision:'confirm'|'decline'} };
+export async function apply(request: Request, exec: Run = run, replace = renameSync, previewOnly = false) {
   const p = plan(request.project,request.source,exec), root = p.root;
   if (!['keep','replace'].includes(request.workflow) || !['keep','new'].includes(request.config)) throw new Error('Explicit workflow and configuration choices required.');
   if (request.expectedConfigHash !== p.configHash || JSON.stringify(request.expectedWorkflow) !== JSON.stringify(p.current)) throw new Error('Project changed since choices; inspect and ask again.');
@@ -198,6 +182,10 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
   const pending = (request.acceptances ?? []).map(a => onboarding.acceptedCandidate(root,a.id,a.digest,a.decision,exec)).filter(Boolean);
   if(usesBundled && !existsSync(join(root,peerRel))) throw new Error('Stage the versioned bundled source and prepare/accept its preview before applying setup.');
   const validation = await validateConfig(config,root,join(request.source,workflow),exec,join(root,peerRel),pending);
+  const prerequisites = await import(pathToFileURL(join(request.source,workflow,'.shared/prerequisites.ts')).href);
+  const confirmationPreview=prerequisites.previewConfirmation(root,validation.selections,exec);
+  if(previewOnly) return {status:'confirmation-preview', project:root, validation, confirmation:confirmationPreview};
+  const confirmation=prerequisites.confirmationPlan(root,validation.selections,request.confirmation,exec);
   const registryPlan = pending.length ? onboarding.activationPlan(root,pending,exec) : null;
   const latest = plan(root,request.source,exec);
   if (latest.configHash !== p.configHash || JSON.stringify(latest.current) !== JSON.stringify(p.current) || JSON.stringify(latest.peerCurrent) !== JSON.stringify(p.peerCurrent)) throw new Error('Project changed during validation; inspect and ask again.');
@@ -222,11 +210,13 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
   for(const item of pending) if(!existsSync(item.target)) prepare(relative(root,item.target),item.package);
   if(registryPlan) prepare(relative(root,registryPlan.path),undefined,JSON.stringify(registryPlan.registry,null,2)+'\n');
   if (request.config === 'new') prepare(profile,undefined,Bun.YAML.stringify(stagedConfig));
+  const confirmationPath=prerequisites.CONFIRMATION_PATH;
+  if(request.confirmation || !existsSync(join(root,confirmationPath))) prepare(confirmationPath,undefined,JSON.stringify(confirmation,null,2)+'\n');
   const record = { source:installedSource, files:actualFiles, peer: usesBundled ? {path:peerRel,source:retainedPeer ? (JSON.stringify(previous?.peer?.files) === JSON.stringify(p.peerCurrent) ? previous.peer.source : null) : p.source,files:files(retainedPeer ? join(root,peerRel) : peerSource)} : previous?.peer, project:root, config:join(root,profile), updatedAt:new Date().toISOString() };
   prepare(manifest,undefined,JSON.stringify(record,null,2)+'\n');
   const exclude = resolve(root,exec(['git','rev-parse','--git-path','info/exclude'],root));
   const oldExclude = existsSync(exclude) ? read(exclude) : '';
-  const ignores = ['/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/','/.archon/prepr-reviewers/sources/','/.archon/prepr-reviewers/drafts/','/.archon/prepr-reviewers/accepted/','/.archon/prepr-reviewers/registry.json'];
+  const ignores = ['/.archon/prepr-prerequisites.json','/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/','/.archon/prepr-reviewers/sources/','/.archon/prepr-reviewers/drafts/','/.archon/prepr-reviewers/accepted/','/.archon/prepr-reviewers/registry.json'];
   const extra = ignores.filter(line=>!oldExclude.split('\n').includes(line));
   let applied = 0;
   try {
@@ -246,7 +236,7 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
     if (existsSync(exclude)) writeFileSync(exclude,oldExclude);
     throw e;
   } finally { rmSync(temp,{recursive:true,force:true}); }
-  return { status:'configured', project:root, config:join(root,profile), source:installedSource, backup, validation, commands:commands(root), note:'Commands are for manual use. Branch scope requires a clean checkout; local scope selects uncommitted work.' };
+  return { status:'configured', project:root, config:join(root,profile), source:installedSource, backup, validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}}, commands:commands(root), ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Run manually in a separate terminal. Foreground server; default port 3090. Binary installs download matching UI assets on first use. The UI is optional for CLI reviews.'}, note:'Commands are for manual use. Branch scope requires a clean checkout; local scope selects uncommitted work.' };
 }
 export async function verify(project: string, exec: Run = run, source?: string) {
   const root = projectRoot(project,exec), record = parse(safePath(root,manifest));
@@ -256,12 +246,15 @@ export async function verify(project: string, exec: Run = run, source?: string) 
   if (exec(['git','check-ignore','--',profile],root) !== profile) throw new Error('Local configuration must be ignored.');
   if (source) sourceInfo(source,exec);
   const validation = await validateConfig(Bun.YAML.parse(read(safePath(root,profile))),root,join(source || root,workflow),exec);
-  return {status:'configured',project:root,config:join(root,profile),source:record.source,validation,commands:commands(root)};
+  const prerequisites=await import(pathToFileURL(join(source||root,workflow,'.shared/prerequisites.ts')).href);
+  const confirmation=prerequisites.confirmationPlan(root,validation.selections,undefined,exec);
+  if(exec(['git','check-ignore','--',prerequisites.CONFIRMATION_PATH],root)!==prerequisites.CONFIRMATION_PATH)throw new Error('Prerequisite confirmation must be locally ignored.');
+  return {status:'configured',project:root,config:join(root,profile),source:record.source,validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}},commands:commands(root),ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Foreground server in a separate terminal; default port 3090. Binary installs download matching UI assets on first use; UI is optional.'}};
 }
 if (import.meta.main) {
   try {
     const [action,...args] = process.argv.slice(2);
-    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'stage-bundled' ? stageBundled(args[0],args[1]) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | plan <project> <source> | inspect <project> <codex,claude> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
+    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'stage-bundled' ? stageBundled(args[0],args[1]) : action === 'preview' ? await apply(parse(args[0]),run,renameSync,true) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | plan <project> <source> | inspect <project> <codex,claude> | preview <request.json> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
     console.log(JSON.stringify(output,null,2));
   } catch(e) { console.error(JSON.stringify({status:'incomplete',error:String(e),unverified})); process.exitCode=1; }
 }
