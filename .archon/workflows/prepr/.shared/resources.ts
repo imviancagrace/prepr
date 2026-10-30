@@ -23,6 +23,6 @@ export function observedRead(raw: string, access: RequiredAccess) {
 export function runtimeAccess(result:ReviewResult,reviewer:Reviewer,model:string):ReviewResult {
   const declarations=[...(reviewer.requiredAccess??[]).map(a=>({...a,required:true})),...(reviewer.runtimeAccess??[])];
   const resources=[...new Map(declarations.map(a=>{const key=JSON.stringify([a.tool,a.resource]);return [key,{...a,required:declarations.some(b=>JSON.stringify([b.tool,b.resource])===key&&b.required)}] as const;})).values()].map(a=>({...a,status:observedRead(result.rawStdout||'',a)?'verified':'unverifiable'}));
-  const missing=resources.filter(a=>a.required&&a.status!=='verified');
-  return {...result,runtime:{launcher:reviewer.launcher,model,responseObserved:result.status==='completed'&&Boolean(result.stdout.trim()),resources},...(missing.length?{status:'failed' as const,stderr:[result.stderr,`Required resource access blocked/incomplete: ${missing.map(a=>`${a.tool} ${a.resource}`).join(', ')}. Check resource access in the selected launcher; no additional permissions were requested.`].filter(Boolean).join('\n')}:{} )};
+  const missing=result.status==='completed'?resources.filter(a=>a.required&&a.status!=='verified'):[];
+  return {...result,runtime:{launcher:reviewer.launcher,executable:reviewer.executable,model,responseObserved:result.status==='completed'&&Boolean(result.stdout.trim()),resources},...(missing.length?{status:'failed' as const,stderr:[result.stderr,`Required resource access blocked/incomplete: ${missing.map(a=>`${a.tool} ${a.resource}`).join(', ')}. Check resource access in the selected launcher; no additional permissions were requested.`].filter(Boolean).join('\n')}:{} )};
 }

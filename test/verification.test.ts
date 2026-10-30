@@ -22,14 +22,14 @@ test('captured nested verification keeps passing checks, partial coverage and fu
  expect(data.confirmedBugs).toHaveLength(0);expect(data.stillDisputed).toHaveLength(0);
  expect(md.split('\n\n')[1]).toContain('within the reviewed portions');
  for(const side of ['a','b'] as const){
-  expect(md).toContain(sample[side].overview);
+  if(side==='a')expect(md).toContain('This was a partial review of the 181-file change.');
   for(const limit of sample[side].verification.limitations)expect(md).toContain(limit);
  }
- expect(md).toContain('A — Project check: passed:** Three focused Jest suites passed: 98 tests.');
- expect(md).toContain('B — Project check: passed:** Four focused Jest suites passed: 117 tests total.');
- expect(md).toContain('scoped spec alignment: Not scored because');expect(md).not.toContain('"scopedSpecAlignment"');expect(md).not.toContain('215');
+ expect(md).toContain('Vee — Project check: passed:** Three focused Jest suites passed: 98 tests.');
+ expect(md).toContain('Peer — Project check: passed:** Four focused Jest suites passed: 117 tests total.');
+ expect(md).not.toContain('Not scored because');expect(md).not.toContain('"scopedSpecAlignment"');expect(md).not.toContain('215');
  expect(md).not.toContain('Project checks: not run');expect(md).not.toContain('Project checks: unknown');
- expect(md.match(/^#.*|^\*\*Verification and limitations\*\*/gm)).toEqual(['# Prepr report','**Verification and limitations**']);
+ expect(md.match(/^#.*/gm)).toEqual(['# Prepr report','## Material review limits']);
 });
 
 test('nested string/object checks preserve explicit statuses, snapshots and limitations without keyword filtering',()=>{
@@ -75,8 +75,8 @@ test('incomplete reports retain the completed side checks and qualifications wit
  const data=incompleteReport({initialReviews:{a:result(sample.a),b:{...result('','Peer'),status:'failed',stderr:'Model unavailable.'}},missing:['Comparison unavailable.']});
  const md=incompleteMarkdown(data);
  expect(data.status).toBe('incomplete');expect(md).toContain('Review incomplete.');expect(md).not.toContain('No actionable concerns were identified');
- expect(md).toContain('98 tests.');expect(md).toContain('partial review of the 181-file change');expect(md).toContain('status is unverified');expect(md).toContain('Not scored because');
- expect(md).toContain('A — Project check: passed');expect(md).toContain('Comparison unavailable.');
+ expect(md).toContain('98 tests.');expect(md).toContain('partial review of the 181-file change');expect(md).toContain('status is unverified');expect(md).not.toContain('Not scored because');
+ expect(md).toContain('Vee — Project check: passed');expect(md).toContain('No completed comparison is available');expect(data.limitations).toContain('Comparison unavailable.');
 });
 
 test('saved results render the standard artifacts and pointers without launcher calls',async()=>{

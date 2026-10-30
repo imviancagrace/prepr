@@ -36,7 +36,7 @@ export function checkInstallation(root:string) {
   if(record.project!==realpathSync(root)||JSON.stringify(files)!==JSON.stringify(record.files))throw new Error('Installed workflow differs from local provenance; run prepr-setup to inspect/repair it.');
   return {name:'Installed workflow integrity',status:'passed' as const,evidence:'Files and executable modes match local installation provenance.'};
 }
-export type Tool={tool:string;status:'present'|'missing-or-incompatible';version?:string};
+export type Tool={path?:string;tool:string;status:'present'|'missing-or-incompatible';version?:string};
 export const launcherBin=(launcher:string)=>launcher==='codex'?Bun.env.PREPR_CODEX_BIN||'codex':Bun.env.PREPR_CLAUDE_BIN||'claude';
 export function inspectTools(launchers:string[],exec:Exec=execute,root?:string,gh=false):Tool[] {
   if(launchers.some(l=>!['codex','claude'].includes(l)))throw new Error('Choose codex or claude.');
@@ -45,7 +45,10 @@ export function inspectTools(launchers:string[],exec:Exec=execute,root?:string,g
       const version=exec([['codex','claude'].includes(tool)?launcherBin(tool):tool,'--version'],root);
       const m=version.match(/(\d+)\.(\d+)\.(\d+)(-[\w.-]+)?/);
       if(!m||tool==='archon'&&(m[4]||Number(m[1])===0&&(Number(m[2])<11||Number(m[2])===11&&Number(m[3])<1)))throw new Error('Unsupported version');
-      return {tool,status:'present',version};
+      const bin=['codex','claude'].includes(tool)?launcherBin(tool):tool;
+      const path=bin.includes('/')?resolve(root||process.cwd(),bin):exec(['which',bin],root).trim();
+      if(!path.startsWith('/'))throw new Error('Executable path could not be resolved.');
+      return {tool,status:'present',version,path};
     }catch{return {tool,status:'missing-or-incompatible'};}
   });
 }
@@ -62,13 +65,14 @@ export function resolveModel(reviewer:Pick<Reviewer,'name'|'launcher'|'model'>,e
 export type Selection={launcher:string;executable:string;model:string};
 export type Confirmation={format:1;project:string;scope:string;selections:Selection[];digest:string;confirmedAt:string};
 export function inspectPrerequisites(reviewers:Reviewer[],root:string,exec:Exec=execute) {
-  const resolved=reviewers.map(r=>({...r,model:resolveModel(r,exec,root)}));
+  let resolved=reviewers.map(r=>({...r,model:resolveModel(r,exec,root)}));
   const tools=inspectTools(resolved.map(r=>r.launcher),exec,root,resolved.some(r=>r.requiredAccess?.some(a=>a.tool==='gh')));
   const missing=tools.filter(t=>t.status!=='present');
   if(missing.length)throw new Error(`Missing/incompatible prerequisites: ${missing.map(t=>t.tool).join(', ')}. Run prepr-setup; obtain permission before installing.`);
   for(const r of resolved)for(const access of r.requiredAccess??[])if(!['file','git','gh'].includes(access.tool))throw new Error(`${r.name}: unsupported required tool ${access.tool}.`);
+  resolved=resolved.map(r=>({...r,executable:{path:tools.find(t=>t.tool===r.launcher)!.path!,version:tools.find(t=>t.tool===r.launcher)!.version!}}));
   const selections=[...new Map(resolved.map(r=>{
-    const bin=launcherBin(r.launcher);const s={launcher:r.launcher,executable:bin.includes('/')?resolve(root,bin):bin,model:r.model};return [JSON.stringify(s),s] as const;
+    const s={launcher:r.launcher,executable:r.executable.path,model:r.model};return [JSON.stringify(s),s] as const;
   })).values()].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return {reviewers:resolved,tools,selections,checks:[{name:'Prerequisites and model configuration',status:'passed' as const,evidence:'Executable versions and model configuration checked without AI sessions; runtime login/model entitlement remains unverified.'}]};
 }
@@ -102,4 +106,11 @@ export function runtimePrerequisites(pair:{reviewerA:Reviewer;reviewerB:Reviewer
   const confirmation=confirmationPlan(root,inspected.selections,undefined,exec);
   if(exec(['git','check-ignore','--',CONFIRMATION_PATH],root)!==CONFIRMATION_PATH)throw new Error('Local prerequisite confirmation must be Git-excluded; run prepr-setup.');
   return {reviewerA:inspected.reviewers[0],reviewerB:inspected.reviewers[1],preparation:{status:'passed' as const,checks:[installed,...inspected.checks],tools:inspected.tools,confirmation:{...confirmation,status:'user-confirmed' as const},limitations:['Confirmation is user attestation; login, model execution and resource access are established only by actual reviewer sessions.']}};
+}
+
+export function modelSuggestions(launchers:string[],root=process.cwd(),exec:Exec=execute) {
+ if(launchers.some(l=>!['codex','claude'].includes(l)))throw new Error('Choose codex or claude.');
+ let tier:any;try {tier=JSON.parse(exec(['archon','ai','tier','list','--json'],root)).tiers?.find((t:any)=>t.tier==='large');}catch{}
+ const effective=tier?.effective,origin=tier?.configured?'project configuration':tier?.user?'user configuration':'default';
+ return [...new Set(launchers)].map(launcher=>{const matches=effective?.provider===launcher&&typeof effective.model==='string'&&effective.model.trim();return {launcher,model:matches?effective.model:null,source:matches?`Archon effective large tier (${origin})`:'Explicit compatible model required',note:'Configuration suggestion only; account availability is established by the actual session.'};});
 }

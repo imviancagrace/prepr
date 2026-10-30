@@ -32,6 +32,7 @@ test('controlled preparation, two reviews, mapped severity, duplicate reuse and 
   const failed=await run(join(scripts,'select-reviewers.ts'),inputs);expect(failed.code).not.toBe(0);expect(failed.stderr).toContain('Neither code review');
   expect(await Bun.file(log).exists()).toBe(false);
   fixturePrerequisites(repo,[{name:'A',launcher:'codex',model:'fixture'},{name:'B',launcher:'claude',model:'fixture'}],{PREPR_CODEX_BIN:env.PREPR_CODEX_BIN,PREPR_CLAUDE_BIN:env.PREPR_CLAUDE_BIN});
+  await rm(join(artifacts,'prepr-failure.json'),{force:true});
   await Bun.write(log,'');
   const selection=await run(join(scripts,'select-reviewers.ts'),inputs);expect(selection.code).toBe(0);
   const selected=selection.output;

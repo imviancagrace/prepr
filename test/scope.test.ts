@@ -41,7 +41,8 @@ test("branch review pins local commits against the fetched default, preserves ch
     expect(git(repo, "rev-parse", "HEAD")).toBe(target);
     expect(git(repo, "status", "--porcelain")).toBe("");
     const reviewer: Reviewer = { name: "A", reference: "a", skillPath: "/a/SKILL.md", launcher: "codex" };
-    expect(agentPrompt(reviewer, result.scope!)).toContain(`git diff ${base} ${target}`);
+    expect(agentPrompt(reviewer,result.scope!)).toContain("saved filtered patch");
+    expect(result.scope!.snapshotPath).toBeDefined();
     expect(agentPrompt({ ...reviewer, name: "B", skillPath: "/b/SKILL.md" }, result.scope!)).toContain(JSON.stringify(result.scope));
     const localBase = captureDiff("branch", repo, "trunk");
     expect(localBase.scope.baseSha).toBe(base);

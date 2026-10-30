@@ -1,11 +1,7 @@
 fixture:
   expect: completed
   inputs:
-    reviewer_a: '{"name":"fixture-a","reference":"fixture-a","skillPath":"/tmp/fixture-a/SKILL.md","launcher":"codex"}'
-    reviewer_b: '{"name":"fixture-b","reference":"fixture-b","skillPath":"/tmp/fixture-b/SKILL.md","launcher":"claude"}'
-    review_a: '{"reviewer":"fixture-a","phase":"initial","status":"completed","stdout":"","stderr":"","exitCode":0,"sessionId":"00000000-0000-0000-0000-000000000001"}'
-    review_b: '{"reviewer":"fixture-b","phase":"initial","status":"completed","stdout":"","stderr":"","exitCode":0,"sessionId":"00000000-0000-0000-0000-000000000002"}'
-    dispute: '[{"id":"reviewer-a-1","reviewer":"reviewer-a","summary":"a.ts:1 guard"}]'
+    dispute_index: "0"
 debate:
   conclusion: "converged-on-issue"
   stopReason: "agreement"

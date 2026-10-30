@@ -30,11 +30,11 @@ test("distinct original reviewers debate, then deliver both report artifacts wit
     expect(debate.conclusion).toBe("converged-on-no-issue");
     const report = buildReport(comparison, [debate]);
     const summary = markdownReport(report);
-    expect(summary).toContain("## Disagreements");
-    expect(summary).toContain("Why the conclusion changed:** Reviewer A:");
+    expect(summary).toContain("## Reviewer differences and where they landed");
+    expect(summary).toContain("Discussion:** Correctness:");
     expect(summary).not.toContain("What you need to decide");
     expect(summary).not.toContain("Remaining decision");
-    expect(summary).toContain("No change is needed for this concern; both reviewers concluded this is not an issue.");
+    expect(summary).toContain("Both reviewers concluded no change is needed.");
     expect(report.initialReviews?.a.rawStdout).toContain("thread.started");
     // The delivery script receives saved evidence only; launchers cannot be used during rendering.
     const deliveryProcess = Bun.spawn(["bun", join(root, ".archon/workflows/prepr/review-debate/scripts/report.ts")], {

@@ -18,3 +18,5 @@ capture-diff:
     diffBytes: 20
 report:
   preview: {mode: local, changedFileCount: 1, diffBytes: 20}
+verify-run:
+  preview: {mode: local, changedFileCount: 1, diffBytes: 20}

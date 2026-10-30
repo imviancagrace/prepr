@@ -93,7 +93,7 @@ export function stageBundled(project:string,source:string,exec:Run=run) {
   if(!Object.keys(actual).length) {mkdirSync(dirname(target),{recursive:true});cpSync(origin,target,{recursive:true});}
   return {source:target,revision:info.commit,status:'inactive-source',note:'Prepare and obtain human acceptance before activation.'};
 }
-export type Tool = { tool: string; status: 'present'|'missing-or-incompatible'; version?: string };
+export type Tool = { path?: string; tool: string; status: 'present'|'missing-or-incompatible'; version?: string };
 export function inspectTools(launchers: string[], exec: Run = run): Tool[] {
   if (launchers.some(l => !['codex','claude'].includes(l))) throw new Error('Choose codex or claude.');
   return [...new Set(['git','bun','archon',...launchers])].map(tool => {
@@ -114,6 +114,10 @@ export function installApproved(steps: InstallStep[], approved: InstallStep[], e
 const unverified = ['Launcher authentication and model entitlement have not been probed.', 'Reviewer sandbox/resource access and project tests have not been verified.'];
 export function commands(root: string) {
   return [...['',' --input scope=branch',' --input preview_only=true',' --input scope=branch --input preview_only=true'].map(flags => `cd ${quote(root)} && archon workflow run prepr --no-worktree${flags}`), `cd ${quote(root)} && archon serve`];
+}
+export function terminalHandoff(tools:Tool[],root:string,exec:Run=run) {
+ const directories=[...new Set(tools.map(t=>t.path?dirname(t.path):'').filter(Boolean))];
+ return {pathCommand:directories.length?`export PATH=${quote(directories.join(':'))}:"$PATH"`:undefined,verifyCommand:'archon --version',note:'Setup verified its own environment. If your terminal cannot find these executables, run the PATH command there; persistent startup-file edits require separate permission.',workflowExclusion:'/.archon/workflows/prepr/ is local-only in Git info/exclude. Remove that rule and explicitly add/commit the package to share it; already tracked files stay tracked.',remainingChanges:exec(['git','status','--short'],root),scopeNote:'Branch scope requires a clean checkout. Runtime filtering excludes managed tooling even when staged/committed, but does not clean Git status or exclude unrelated archives.'};
 }
 async function skillExists(reference: string, root: string, exec: Run) {
   const github = reference.match(/^(?:github:|https:\/\/github\.com\/)([\w.-]+\/[\w.-]+)@([a-f0-9]{40})(?::|#)(.+)$/i);
@@ -150,7 +154,7 @@ export async function validateConfig(config: any, root: string, packageRoot: str
   const accepted = [reviewerA,reviewerB].map(reviewer => onboarding.resolveAccepted(reviewer.reference === 'bundled:peer' ? bundledSource! : reviewer.reference,root,exec,pending));
   const prerequisites = await import(pathToFileURL(join(packageRoot,'.shared/prerequisites.ts')).href);
   const inspected=prerequisites.inspectPrerequisites([reviewerA,reviewerB].map((r,i)=>({...r,...accepted[i],requiredAccess:[...(r.requiredAccess??[]),...accepted[i].requiredAccess]})),root,exec);
-  return { tools:inspected.tools, checks:inspected.checks, selections:inspected.selections, unverified, reviewers: accepted.map(r=>r.reviewerPackage) };
+  return { tools:inspected.tools, checks:inspected.checks, selections:inspected.selections, executableDetails:inspected.reviewers.map((r:any)=>({name:r.name,launcher:r.launcher,model:r.model,...r.executable})), unverified, reviewers: accepted.map(r=>r.reviewerPackage) };
 }
 
 type Request = { project: string; source: string; workflow: 'keep'|'replace'; config: 'keep'|'new'; configFile?: string; expectedConfigHash: string|null; expectedWorkflow: Record<string,string>; peer?: 'keep'|'replace'; expectedPeer?: Record<string,string>; acceptances?: {id:string;digest:string;decision:'accept'}[]; confirmation?: {digest:string;decision:'confirm'|'decline'} };
@@ -216,7 +220,7 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
   prepare(manifest,undefined,JSON.stringify(record,null,2)+'\n');
   const exclude = resolve(root,exec(['git','rev-parse','--git-path','info/exclude'],root));
   const oldExclude = existsSync(exclude) ? read(exclude) : '';
-  const ignores = ['/.archon/prepr-prerequisites.json','/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/','/.archon/prepr-reviewers/sources/','/.archon/prepr-reviewers/drafts/','/.archon/prepr-reviewers/accepted/','/.archon/prepr-reviewers/registry.json'];
+  const ignores = ['/.archon/workflows/prepr/','/.archon/prepr-prerequisites.json','/.archon/prepr.local.yaml','/.archon/prepr-install.json','/.archon/prepr-backups/','/.archon/.prepr-stage-*/','/.archon/prepr-reviewers/sources/','/.archon/prepr-reviewers/drafts/','/.archon/prepr-reviewers/accepted/','/.archon/prepr-reviewers/registry.json'];
   const extra = ignores.filter(line=>!oldExclude.split('\n').includes(line));
   let applied = 0;
   try {
@@ -231,12 +235,13 @@ export async function apply(request: Request, exec: Run = run, replace = renameS
     mkdirSync(dirname(exclude),{recursive:true});
     if (extra.length) writeFileSync(exclude,oldExclude+(oldExclude.endsWith('\n')||!oldExclude?'':'\n')+extra.join('\n')+'\n');
     if (exec(['git','check-ignore','--',profile],root) !== profile) throw new Error('Local profile exclusion could not be verified.');
+    if(exec(['git','check-ignore','--no-index','--',workflow+'/'],root)!==workflow+'/')throw new Error('Local workflow exclusion could not be verified.');
   } catch (e) {
     for (const op of operations.slice(0,applied).reverse()) { rmSync(op.target,{recursive:true,force:true}); if(op.saved) renameSync(op.saved,op.target); }
     if (existsSync(exclude)) writeFileSync(exclude,oldExclude);
     throw e;
   } finally { rmSync(temp,{recursive:true,force:true}); }
-  return { status:'configured', project:root, config:join(root,profile), source:installedSource, backup, validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}}, commands:commands(root), ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Run manually in a separate terminal. Foreground server; default port 3090. Binary installs download matching UI assets on first use. The UI is optional for CLI reviews.'}, note:'Commands are for manual use. Branch scope requires a clean checkout; local scope selects uncommitted work.' };
+  return { status:'configured', project:root, config:join(root,profile), source:installedSource, backup, handoff:terminalHandoff(validation.tools,root,exec),validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}}, commands:commands(root), ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Run manually in a separate terminal. Foreground server; default port 3090. Binary installs download matching UI assets on first use. The UI is optional for CLI reviews.'}, note:'Commands are for manual use. Branch scope requires a clean checkout; local scope selects uncommitted work.' };
 }
 export async function verify(project: string, exec: Run = run, source?: string) {
   const root = projectRoot(project,exec), record = parse(safePath(root,manifest));
@@ -244,17 +249,18 @@ export async function verify(project: string, exec: Run = run, source?: string) 
   if (record.peer && JSON.stringify(files(safePath(root,record.peer.path))) !== JSON.stringify(record.peer.files)) throw new Error('Bundled peer changed since installation.');
   if (exec(['git','ls-files','--',profile],root)) throw new Error('Local profile is tracked.');
   if (exec(['git','check-ignore','--',profile],root) !== profile) throw new Error('Local configuration must be ignored.');
+  if(exec(['git','check-ignore','--no-index','--',workflow+'/'],root)!==workflow+'/')throw new Error('Local workflow exclusion must be restored through setup; tracked files remain tracked.');
   if (source) sourceInfo(source,exec);
   const validation = await validateConfig(Bun.YAML.parse(read(safePath(root,profile))),root,join(source || root,workflow),exec);
   const prerequisites=await import(pathToFileURL(join(source||root,workflow,'.shared/prerequisites.ts')).href);
   const confirmation=prerequisites.confirmationPlan(root,validation.selections,undefined,exec);
   if(exec(['git','check-ignore','--',prerequisites.CONFIRMATION_PATH],root)!==prerequisites.CONFIRMATION_PATH)throw new Error('Prerequisite confirmation must be locally ignored.');
-  return {status:'configured',project:root,config:join(root,profile),source:record.source,validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}},commands:commands(root),ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Foreground server in a separate terminal; default port 3090. Binary installs download matching UI assets on first use; UI is optional.'}};
+  return {status:'configured',project:root,config:join(root,profile),source:record.source,handoff:terminalHandoff(validation.tools,root,exec),validation:{...validation,confirmation:{...confirmation,status:'user-confirmed'}},commands:commands(root),ui:{command:commands(root).at(-1),optional:true,separateTerminal:true,note:'Foreground server in a separate terminal; default port 3090. Binary installs download matching UI assets on first use; UI is optional.'}};
 }
 if (import.meta.main) {
   try {
     const [action,...args] = process.argv.slice(2);
-    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'stage-bundled' ? stageBundled(args[0],args[1]) : action === 'preview' ? await apply(parse(args[0]),run,renameSync,true) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | plan <project> <source> | inspect <project> <codex,claude> | preview <request.json> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
+    const output = action === 'fetch' ? fetchMain() : action === 'plan' ? plan(args[0],args[1]) : action === 'inspect' ? inspectTools((args[1]||'').split(',').filter(Boolean)) : action === 'suggest' ? (await import(pathToFileURL(join(args[1],workflow,'.shared/prerequisites.ts')).href)).modelSuggestions((args[2]||'').split(',').filter(Boolean),args[0],run) : action === 'stage-bundled' ? stageBundled(args[0],args[1]) : action === 'preview' ? await apply(parse(args[0]),run,renameSync,true) : action === 'apply' ? await apply(parse(args[0])) : action === 'install' ? installApproved(parse(args[0]),parse(args[1])) ?? {status:'installed',note:'Re-run inspect to verify compatible versions.'} : action === 'verify' ? await verify(args[0],run,args[1]) : (()=>{throw new Error('Use fetch | suggest <project> <fresh-source> <codex,claude> | plan <project> <source> | inspect <project> <codex,claude> | preview <request.json> | apply <request.json> | install <plan.json> <approved-plan.json> | verify <project>');})();
     console.log(JSON.stringify(output,null,2));
   } catch(e) { console.error(JSON.stringify({status:'incomplete',error:String(e),unverified})); process.exitCode=1; }
 }

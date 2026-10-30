@@ -1,3 +1,4 @@
+import {currentFailure,recordFailure} from '../../.shared/failures.ts';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { optionalInput, json, type Debate } from '../../.shared/core.ts';
@@ -26,11 +27,12 @@ if(initialReviews.a?.status==='completed'&&initialReviews.b?.status==='completed
     const results:Debate[]=cache?.runId===runId&&Array.isArray(cache.results)?cache.results:[];
     debates=(comparison.disputes??[]).map((dispute:Debate['dispute'])=>results.find(result=>JSON.stringify(result.dispute.map(f=>f.id))===JSON.stringify(dispute.map(f=>f.id)))??{dispute,rounds:[],stopReason:'incomplete',conclusion:'unresolved'});
   }
-  data=buildReport(comparison,debates);
+  if(debates.some(d=>d.stopReason==='incomplete'))recordFailure({stage:'discussion',cause:'orchestration',message:'Initial reviews completed, but required discussion results are missing or incomplete.',recovery:'Inspect the discussion node error and saved evidence, then retry after correcting the workflow failure.'});
+  data=buildReport(comparison,debates);data.failure=currentFailure();
   data.preparation={...data.preparation,...preparation,scope:scope?.scope??data.preparation.scope};
   markdown=markdownReport(data);
 } else {
-  data=incompleteReport({scope:scope?.scope,preparation,initialReviews,missing});
+  data=incompleteReport({scope:scope?.scope,preparation,initialReviews,missing,failure:currentFailure()});
   markdown=incompleteMarkdown(data);
 }
 await mkdir(artifactsDir,{recursive:true});

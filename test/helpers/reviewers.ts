@@ -26,7 +26,7 @@ export function fixturePrerequisites(project:string,reviewers:any[],bins:Record<
   mkdirSync(dirname(exclude),{recursive:true});
   writeFileSync(exclude,(existsSync(exclude)?readFileSync(exclude,'utf8'):'')+'\n/.archon/workflows/prepr/\n/.archon/prepr-install.json\n/'+CONFIRMATION_PATH+'\n');
   writeFileSync(join(project,'.archon/prepr-install.json'),JSON.stringify({project:realpathSync(project),files:inventory(pkg)}));
-  const exec=(args:string[],cwd?:string)=>args[1]==='--version'?args[0]==='archon'?'0.11.1':'1.3.14':execute(args,cwd);
+  const exec=(args:string[],cwd?:string)=>args[0]==='which'?'/fixture/bin/'+args[1]:args[1]==='--version'?args[0]==='archon'?'0.11.1':'1.3.14':execute(args,cwd);
   const inspected=inspectPrerequisites(reviewers,project,exec);
   const p=previewConfirmation(project,inspected.selections,exec);
   const confirmation=confirmationPlan(project,inspected.selections,{digest:p.digest,decision:'confirm'},exec);

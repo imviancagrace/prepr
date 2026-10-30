@@ -1,11 +1,13 @@
-import { sameConcern, type Debate, type Finding, type ReviewResult, type DebatePosition } from "../../.shared/core.ts";
+import type {Failure} from '../../.shared/failures.ts';
+import { sameConcern, type Debate, type Finding, type ReviewResult } from "../../.shared/core.ts";
 import { sameLocation, severityConflict } from "../../.shared/findings.ts";
 
 import { reuseDiscussion } from "../../.shared/reuse.ts";
-import { verification, limitSentences, type Verification } from "../../.shared/verification.ts";
+import { verification, type Verification } from "../../.shared/verification.ts";
 
 type Comparison = { runId?: string; reviewers: { a: string; b: string }; findings: unknown[]; agreements: Finding[][]; initialReviews?: { a: ReviewResult; b: ReviewResult } };
 export type PreprReport = {
+  failure?:Failure;
   reviewers: Comparison["reviewers"];
   initialFindings: unknown[];
   initialReviews?: Comparison["initialReviews"];
@@ -51,7 +53,7 @@ const initialConclusion = (dispute: Finding[]): Debate["conclusion"] => {
   return "unresolved";
 };
 const uncertainty = (debate: Debate) => debate.stopReason === "incomplete"
-  ? "Decide whether this concern needs action once the missing review evidence is available. A reviewer session did not complete, so the evidence is incomplete."
+  ? "Discussion did not complete; this concern remains unconfirmed until the missing discussion evidence is available."
   : "Decide whether this concern needs action by weighing the reviewers' differing evidence; they have not established a shared conclusion.";
 
 export const buildReport = (comparison: Comparison, debates: Debate[]): PreprReport => {
@@ -91,136 +93,175 @@ export const buildReport = (comparison: Comparison, debates: Debate[]): PreprRep
   };
 };
 
-const readable = (text: string) => text.replace(/\s+/g, " ").replace(/^\s*(?:\d+[.)]\s*|\[P[0-3]\]\s*|(?:critical|high|medium|low):\s*)+/i, "").trim();
-const short = (text: string, words = 55) => {
-  if (words >= 35 && limitSentences(text).length) return readable(text);
-  const parts = readable(text).split(" ");
-  return parts.length > words ? `${parts.slice(0, words).join(" ")}…` : parts.join(" ");
+const readable = (text: string) => text.replace(/\s+/g, ' ').replace(/^\s*(?:\d+[.)]\s*|\[P[0-3]\]\s*|(?:critical|high|medium|low):\s*)+/i, '').trim();
+const sentences = (text: string) => {
+  const tokens:string[]=[];let marker='PREPRTOKEN';while(text.includes(marker))marker+='_';
+  const protectedText=readable(text).replace(/`[^`]+`|[.\w/-]*[./][\w_/-]+(?:\.[\w_/-]+)*/g,value=>`${marker}${tokens.push(value)-1}END`);
+  return [...new Intl.Segmenter('en',{granularity:'sentence'}).segment(protectedText)].map(s=>s.segment.trim().replace(new RegExp(marker+'(\\d+)END','g'),(_,n)=>tokens[Number(n)])).filter(Boolean);
 };
-const findingClaim = (finding: Finding) => readable(finding.summary).replace(/^\S+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php|md|ya?ml|json|sql):\d+\s*[—:–-]?\s*/, "");
-const rationale = (finding?: Finding) => {
-  if (!finding) return "Did not raise this concern in the initial review.";
-  if (finding.evidence === finding.summary) return finding.verdict === "no_issue"
-    ? "Initially dismissed the concern; no separate supporting rationale was recorded."
-    : finding.verdict === "issue" ? "Initially considered this an issue; no separate supporting rationale was recorded."
-    : "Raised this concern without a separate supporting rationale.";
-  const text = finding.evidence.match(/(?:Private rationale|Rationale|Evidence):\s*([^\n]+)/i)?.[1] ?? finding.evidence;
-  return short(text);
+const material = (text:string) => /\b(if|unless|until|only when|provided that|unverified|unknown|conditional|depends on|partial|could not|couldn't|not verified|not reproduced|not inspect|not run|not established)\b/i.test(text);
+// Extract whole statements and their conditions; never cut off the tail of a qualified claim.
+const compact = (text:string, context=false) => {
+  const parts=sentences(text).filter(s=>{
+    if(/^(?:Origin:|target baseline:|current-main status:|(?:The )?Base64 searches.{0,240}(?:found nothing|turned up no))/i.test(s))return false;
+    return !/^(?:No (?:new|contrary) evidence|We (?:still )?agree|Nothing new|Everything else holds|Neither gap changes)/i.test(s)||material(s)||/correction|revis|change|but|however/i.test(s);
+  });
+  const selected=context?parts.filter(material):parts.slice(0,2);
+  const corrections=parts.filter(s=>/dropping|withdrawing|(?:half|part|concern) still holds|only correction/i.test(s)).map(s=>s.match(/\bI(?:'m| am) (?:dropping|withdrawing|narrowing)\b.+/i)?.[0]??s);
+  const statements=[...new Set([...selected,...corrections,...parts.filter(material)])];
+  return statements.filter((s,i)=>!statements.some((other,j)=>i!==j&&other!==s&&other.includes(s))).sort((a,b)=>parts.findIndex(p=>p.includes(a))-parts.findIndex(p=>p.includes(b))).join(' ');
 };
-const opposite = (a?: { verdict?: string; severityLevel?: string }, b?: { verdict?: string; severityLevel?: string }) => Boolean(a && b && (
-  (a.verdict && b.verdict && a.verdict !== b.verdict) || severityConflict(a, b)
-));
-const disputed = (debate: Debate) => opposite(debate.dispute.find(f => f.reviewer === "reviewer-a"), debate.dispute.find(f => f.reviewer === "reviewer-b"))
-  || debate.rounds.some(round => opposite(round.positionA, round.positionB))
-  || debate.stopReason === "agree_to_disagree";
-const outcome = (debate: Debate) => debate.conclusion === "converged-on-issue" ? "Both reviewers concluded this is an issue."
-  : debate.conclusion === "converged-on-no-issue" ? "No change is needed for this concern; both reviewers concluded this is not an issue."
-  : debate.stopReason === "incomplete" ? "Review incomplete; no shared conclusion is established."
-  : debate.stopReason === "agree_to_disagree" ? "Both reviewers chose to leave their differing conclusions unresolved."
-  : "The reviewers did not reach a shared conclusion.";
-const bullet = (label: string, text: string) => `- **${label}:** ${text}`;
-const assessmentText = (value: unknown): string => {
-  if (Array.isArray(value)) return value.map(assessmentText).join('; ');
-  if (value && typeof value === 'object') return Object.entries(value).map(([key, entry]) => `${key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()}: ${assessmentText(entry)}`).join('; ');
-  return String(value);
-};
-const verificationBullets = (side: string, supplied: Verification) => [
-  ...(supplied.overview ? [bullet(`${side} — Review assessment`, readable(supplied.overview))] : []),
-  ...supplied.checks.map(check => bullet(`${side} — ${check.name}: ${check.status}`, `${readable(check.evidence)}${check.snapshot ? ` (snapshot ${check.snapshot})` : ""}`)),
-  ...supplied.limitations.map(limit => bullet(`${side} limitation`, readable(limit))),
-  ...(supplied.assessments !== undefined ? [bullet(`${side} — Additional assessments`, readable(assessmentText(supplied.assessments)))] : []),
-];
-const positionText = (position: DebatePosition, initial?: Finding) => {
-  const before = rationale(initial), after = short(position.rationale, 35);
-  return before === after ? before : `${before} Latest reasoning: ${after}`;
-};
+const bullet=(label:string,text:string)=>`- **${label}:** ${text}`;
+const failureClient=(failure?:Failure)=>failure?.executable?`Client: ${failure.launcher} \`${failure.executable.path}\` (${failure.executable.version}); model \`${failure.model}\`.`:undefined;
+const opposite=(a?:{verdict?:string;severityLevel?:string},b?:{verdict?:string;severityLevel?:string})=>Boolean(a&&b&&((a.verdict&&b.verdict&&a.verdict!==b.verdict)||severityConflict(a,b)));
+const initial=(d:Debate,side:'a'|'b')=>d.dispute.find(f=>f.reviewer===`reviewer-${side}`);
+const lastPosition=(d:Debate,side:'a'|'b')=>d.rounds.at(-1)?.[side==='a'?'positionA':'positionB'];
+const opposed=(d:Debate)=>opposite(initial(d,'a'),initial(d,'b'))||d.rounds.some(r=>opposite(r.positionA,r.positionB))||d.stopReason==='agree_to_disagree';
+const claim=(f:Finding)=>readable(f.question||f.title||f.summary).replace(/^[\p{L}_ -]+ \d+:\s*/u,'');
+const references=(items:Debate[])=>[...new Set(items.flatMap(d=>d.dispute.map(f=>f.file?`${f.file}${f.line!==undefined?`:${f.line}`:''}`:undefined)).filter(Boolean))].map(p=>`\`${p}\``).join(', ');
+const title=(text:string)=>sentences(text)[0]||readable(text);
 
-function entry(debate: Debate, isDisagreement: boolean): string {
-  const finding = debate.dispute[0];
-  const latest = debate.rounds.at(-1);
-  const correction = latest?.positionA.correctedFinding ?? latest?.positionB.correctedFinding;
-  const concern = short(correction || findingClaim(finding));
-  const title = short(finding.title || findingClaim(finding), 12);
-  const references = [...new Set(debate.dispute.map(f => f.file ? `${f.file}${f.line !== undefined ? `:${f.line}` : ""}` : f.summary.match(/(?:[\w./-]+\.[\w]+|\.gitignore):\d+/)?.[0]).filter(Boolean).map(ref => `\`${ref}\``))];
-  const lines = [bullet("Concern", `${concern}${references.length ? ` (${references.join(", ")})` : ""}`)];
-  for (const initial of debate.dispute) if (initial.question) lines.push(bullet(`${initial.reviewer === 'reviewer-a' ? 'A' : 'B'}'s question`, readable(initial.question)));
-  if (isDisagreement) {
-    const a = debate.dispute.find(f => f.reviewer === "reviewer-a"), b = debate.dispute.find(f => f.reviewer === "reviewer-b");
-    const firstDifference = debate.rounds.find(round => opposite(round.positionA, round.positionB));
-    const showReason = (initial: Finding | undefined, side: "positionA" | "positionB") => {
-      const severity = severityConflict(a, b) && initial?.severity ? `Initially rated ${initial.severity} severity. ` : "";
-      const start = severity + (firstDifference && (!opposite(a, b) || initial?.evidence === initial?.summary) ? positionText(firstDifference[side], initial) : rationale(initial));
-      if (debate.conclusion === "unresolved" && latest && firstDifference !== latest) return `${start} Latest reasoning: ${short(latest[side].rationale, 35)}`;
-      return start;
-    };
-    lines.push(bullet("A's reasoning", showReason(a, "positionA")));
-    lines.push(bullet("B's reasoning", showReason(b, "positionB")));
-    lines.push(bullet("Review conclusion", outcome(debate)));
-    if (debate.conclusion !== "unresolved" && latest) {
-      // Prefer the response that changed its verdict, so the resolution explains the movement.
-      const changed = debate.rounds.flatMap((round, index) => {
-        const prior = debate.rounds[index - 1];
-        return [[prior?.positionA.verdict ?? a?.verdict, round.positionA, "Reviewer A"], [prior?.positionB.verdict ?? b?.verdict, round.positionB, "Reviewer B"]] as [string | undefined, DebatePosition, string][];
-      }).findLast(([before, after]) => before && before !== after.verdict && after.verdict === latest.positionA.verdict);
-      lines.push(bullet("Why the conclusion changed", `${changed?.[2] ?? "Reviewer A"}: ${short((changed?.[1] ?? latest.positionA).rationale)}`));
+export function verificationBullets(name:string,supplied:Verification) {
+  const checks=supplied.checks.filter(c=>['failed','blocked'].includes(c.status)||!/^Resource |snapshot|integrity|actual reviewer response|static workflow/i.test(c.name)&&(/test|suite|lint|build|type.?check/i.test(c.name)&&c.name!=='Project check'||/test|suite|lint|build/i.test(c.evidence)&&/passed|passing|failed|not run|unverified|interrupted|\bran\b|execut/i.test(c.evidence)));
+  const routine=(t:string)=>/^Reviewer execution .+; the review is incomplete\.$/i.test(t)||/no (?:current )?(?:feature )?(?:specification|ticket|spec)\b|no alignment score|ignored files and committed branch|operational claims about Git-excluded|snapshot has no tests, CI/i.test(t);
+  const overview=sentences(supplied.overview??'').filter(s=>/partial|coverage|only.{0,60}(?:inspect|review)|(?:inspect|review).{0,60}only/i.test(s));
+  const limits=[...new Set([...overview,...supplied.limitations].filter(t=>!routine(t)).map(t=>{const brief=compact(t);return [brief,...sentences(t).filter(s=>material(s)&&!brief.includes(s)&&! /^(?:The )?Base64 searches.{0,240}(?:found nothing|turned up no)/i.test(s))].filter(Boolean).join(' ');}))].filter((t,i,all)=>t&&!all.some((u,j)=>j!==i&&u!==t&&u.includes(t))&&!checks.some(c=>readable(c.evidence)===t));
+  const assessments:string[]=[];
+  const assess=(value:unknown,key='')=>{
+    if(!value||typeof value!=='object')return;
+    const entries=Object.entries(value),scored=entries.some(([k,v])=>/score|rating/i.test(k)&&typeof v==='number');
+    for(const [k,v] of entries){
+      if(v&&typeof v==='object')assess(v,k);
+      else if(typeof v==='number'&&/score|rating/i.test(k))assessments.push(`${key?key+' ':''}${k}: ${v}`);
+      else if(typeof v==='string'&&(scored&&/reason|evidence|limitation/i.test(k)||/alignment|assessment|verdict/i.test(k)&&/unmet|misalign|noncompliant|not satisfied|failed/i.test(v)))assessments.push(compact(v));
     }
-    if (debate.conclusion === "unresolved") lines.push(bullet("What you need to decide", uncertainty(debate)));
-    else if (debate.conclusion === "converged-on-issue" && severityConflict(latest?.positionA.severityLevel ? latest.positionA : a, latest?.positionB.severityLevel ? latest.positionB : b)) lines.push(bullet("What you need to decide", `Decide how urgently to address this issue: A initially rated it ${a?.severity} (${a?.severityLevel}), while B rated it ${b?.severity} (${b?.severityLevel}). No shared severity rating was recorded during debate.`));
-  } else {
-    const reasons = latest ? [latest.positionA.rationale, latest.positionB.rationale] : debate.dispute.map(f => rationale(f));
-    const distinct = [...new Set(reasons.map(text => short(text)))];
-    lines.push(bullet("Reviewers' reasoning", distinct.length === 1 ? `Both reviewers: ${distinct[0]}` : `A: ${distinct[0]} B: ${distinct[1] ?? "No supporting reasoning recorded."}`));
-    lines.push(bullet("Review conclusion", outcome(debate)));
-  }
-  const limits = [...new Set([...debate.dispute.flatMap(f => limitSentences(f.evidence)), ...(latest ? [...limitSentences(latest.positionA.rationale), ...limitSentences(latest.positionB.rationale)] : [])])];
-  if (limits.length) lines.push(bullet("Evidence limits and conditions", limits.join(" ")));
-  const a = debate.dispute.find(f => f.reviewer === "reviewer-a"), b = debate.dispute.find(f => f.reviewer === "reviewer-b");
-  if (a?.severity || b?.severity) lines.push(bullet("Severity", `A: ${a?.severity || "not supplied"}${a?.severityLevel ? ` (${a.severityLevel})` : " (unmapped)"}; B: ${b?.severity || "not supplied"}${b?.severityLevel ? ` (${b.severityLevel})` : " (unmapped)"}.${!a?.severityLevel || !b?.severityLevel ? " Severity comparison unavailable." : ""}`));
-  const impact = debate.dispute.map(f => f.impact).find(Boolean);
-  if (impact) lines.push(bullet(debate.conclusion === "converged-on-no-issue" ? "Why it mattered" : "Why it matters", short(impact)));
-  return `### ${title}\n\n${lines.join("\n")}`;
+  };assess(supplied.assessments);
+  return [...checks.map(c=>bullet(`${name} — ${c.name}: ${c.status}`,compact(c.evidence))),...limits.map(t=>bullet(`${name} limitation`,t)),...assessments.map(t=>bullet(`${name} assessment`,t))];
 }
 
-export const markdownReport = (report: PreprReport): string => {
-  const sections: Record<string, Debate[]> = { Disagreements: [], Agreements: [], "Withdrawn concerns": [] };
-  const seen: Finding[] = [];
-  // Unresolved outcomes take priority if the same concern appears in several evidence categories.
-  const all = [...report.concerns].sort((a, b) => Number(b.conclusion === "unresolved") - Number(a.conclusion === "unresolved"));
-  for (const debate of all) {
-    const finding = debate.dispute[0];
-    if (!finding || seen.some(previous => previous.id === finding.id || sameConcern(previous, finding))) continue;
-    seen.push(finding);
-    const section = debate.conclusion === "unresolved" || disputed(debate) ? "Disagreements"
-      : debate.conclusion === "converged-on-no-issue" ? "Withdrawn concerns" : "Agreements";
-    sections[section].push(debate);
+// A recorded relation can justify a display group; it does not satisfy bilateral duplicate reuse.
+function related(a:Debate,b:Debate,report:PreprReport) {
+  if(a.conclusion!=='converged-on-issue'||b.conclusion!==a.conclusion||opposed(a)||opposed(b))return false;
+  if(!a.dispute.some(x=>b.dispute.some(y=>x.file&&x.file===y.file&&x.reviewer!==y.reviewer)))return false;
+  const links=(from:Debate,to:Debate)=>from.rounds.some(r=>(['a','b'] as const).some(side=>{
+    const pos=r[side==='a'?'positionA':'positionB'];
+    if(pos.sameConcernAs?.some(id=>to.dispute.some(f=>f.id===id)))return true;
+    if(/\b(?:not|different|isn't|is not).{0,35}(?:same concern|duplicate)/i.test(pos.rationale))return false;
+    if(!/\b(?:same concern|duplicate) as my first finding\b/i.test(pos.rationale))return false;
+    const first=(report.initialFindings as Finding[]).find(f=>f.reviewer===`reviewer-${side}`);
+    return Boolean(first&&to.dispute.some(f=>f.id===first.id));
+  }));
+  return links(a,b)||links(b,a);
+}
+function displayGroups(report:PreprReport) {
+  const groups:Debate[][]=[];
+  for(const d of report.concerns){if(!d.dispute.length)continue;const group=groups.find(g=>g.some(other=>related(other,d,report)));if(group)group.push(d);else groups.push([d]);}
+  return groups;
+}
+function section(items:Debate[]) {
+  if(items.some(d=>d.conclusion==='unresolved'&&!opposed(d)))return 'Open questions requiring evidence';
+  if(items.every(d=>d.conclusion==='converged-on-no-issue')&&!items.some(opposed))return undefined;
+  const authors=new Set(items.flatMap(d=>d.dispute.map(f=>f.reviewer)));
+  if(items.some(opposed)||authors.size===1||items.some(d=>d.rounds.some(r=>r.positionA.correctedFinding||r.positionB.correctedFinding)))return 'Reviewer differences and where they landed';
+  return 'Other agreements';
+}
+function ratings(items:Debate[],names:{a:string;b:string}) {
+  return (['a','b'] as const).flatMap(side=>{
+    const values=[...new Set(items.flatMap(d=>{
+      const latest=lastPosition(d,side),f=initial(d,side);
+      return latest?.severity?[latest.severity]:f?.severity?[f.severity]:[];
+    }))];
+    return values.length?[bullet(`${names[side]}'s rating`,values.join('; '))]:[];
+  });
+}
+function discussion(d:Debate,names:{a:string;b:string}) {
+  const last=d.rounds.at(-1);if(!last)return '';
+  const changes=d.rounds.flatMap((r,i)=>{const previous=d.rounds[i-1];return (['a','b'] as const).flatMap(side=>{
+    const key=side==='a'?'positionA':'positionB',pos=r[key],before=previous?.[key]?.verdict??initial(d,side)?.verdict;
+    return pos.verdict&&pos.verdict!==before&&pos.verdict===last[key].verdict?[{side,pos}]:[];
+  });});
+  const correction=(['a','b'] as const).find(side=>/dropping|withdraw|narrow|accept.{0,30}correction/i.test(last[side==='a'?'positionA':'positionB'].rationale));
+  const changed=correction?{side:correction,pos:last[correction==='a'?'positionA':'positionB']}:changes.at(-1);
+  if(changed)return `${names[changed.side]}: ${compact(changed.pos.rationale)}`;
+  const first=d.rounds.find(r=>opposite(r.positionA,r.positionB));
+  if(first)return `${names.a}: ${compact(first.positionA.rationale)} ${names.b}: ${compact(first.positionB.rationale)}`;
+  return '';
+}
+function entry(items:Debate[],heading:string,names:{a:string;b:string},report:PreprReport) {
+  const d=items[0],f=d.dispute[0],last=d.rounds.at(-1);
+  const corrected=last?.positionA.correctedFinding??last?.positionB.correctedFinding;
+  const narrowed=!f.question&&!f.title&&last&&[last.positionA,last.positionB].some(p=>/dropping|withdraw|narrow|accept.{0,30}correction/i.test(p.rationale));
+  const headingText=corrected||f.question||f.title||(narrowed?sentences(last!.positionA.rationale)[0]:claim(f));
+  const lines=[`### ${title(headingText)}`,`${references(items)}${items.length>1?` · **${items.length} findings presented together**`:''}`];
+  const incomplete=items.some(d=>d.stopReason==='incomplete');
+  for(const side of ['a','b'] as const){
+    const findings=items.flatMap(d=>d.dispute.filter(f=>f.reviewer===`reviewer-${side}`));
+    const initialText=findings.length?findings.map(f=>f.question&&headingText===f.question?['Raised this question.',...sentences(f.question).slice(1)].join(' '):f.question||compact(f.evidence||f.summary)).join(' '):report.initialReviews?.[side]?.status==='completed'?'Did not initially flag this concern.':'Initial evidence unavailable; no initial position is inferred.';
+    lines.push(bullet(`${names[side]} initially`,initialText));
   }
-  const unresolved = Object.values(sections).flat().filter(d => d.conclusion === "unresolved").length;
-  const issues = Object.values(sections).flat().filter(d => d.conclusion === "converged-on-issue").length;
-  const incomplete=report.preparation.status==='failed'||report.concerns.some(d=>d.stopReason==='incomplete')||[report.initialReviews?.a,report.initialReviews?.b].some(r=>r&&r.status!=='completed');
-  const qualified = Object.values(report.verification).some(v=>v.overview || v.limitations.length);
-  const assessment = incomplete ? "Review incomplete; the available evidence does not establish a complete review." : !seen.length ? qualified ? "No actionable concerns were identified within the reviewed portions; see the attributed assessments and limitations below." : "No actionable concerns were identified."
-    : !issues && !unresolved ? "All raised concerns were dismissed; none remain unresolved."
-    : `${issues} concern${issues === 1 ? "" : "s"} supported by both reviewers; ${unresolved} ${unresolved === 1 ? "remains" : "remain"} unresolved. ${unresolved ? "Review the differing evidence before deciding your next steps." : "Use the reasoning below to decide which concerns warrant action."}`;
-  const checks = (["a", "b"] as const).flatMap(side => verificationBullets(side.toUpperCase(), report.verification[side]));
-  checks.unshift(...(report.preparation.checks??[]).map(c=>bullet(`Static check — ${c.name}: ${c.status}`,c.evidence)),...(report.preparation.confirmation?[bullet('Launcher/model prerequisites: user-confirmed','User reported login/model access; confirmation is not observed runtime authentication or resource access.')]:[]),...(report.preparation.limitations??[]).map(l=>bullet('Preparation limitation',l)));
-  return [`# Prepr report`, assessment, `**Verification and limitations**\n\n${checks.join("\n")}`, `Reviewers: A — ${report.reviewers.a}; B — ${report.reviewers.b}.`,
-    ...Object.entries(sections).filter(([, items]) => items.length).map(([title, items]) => `## ${title}\n\n${items.map(debate => entry(debate, title === "Disagreements")).join("\n\n")}`),
-  ].join("\n\n");
+  if(heading==='Open questions requiring evidence') {
+    const bothUnknown=last&&last.reviewerA.status==='completed'&&last.reviewerB.status==='completed'&&!last.positionA.verdict&&!last.positionB.verdict;
+    lines.push(bullet('After discussion',incomplete?'Unconfirmed — discussion did not complete.':bothUnknown?'Both reviewers left the issue verdict unknown.':'No shared issue/no-issue conclusion is established.'));
+    const missing=items.flatMap(d=>d.rounds.at(-1)?(['a','b'] as const).flatMap(side=>{
+      const text=lastPosition(d,side)?.rationale??'';
+      return sentences(text).filter(t=>/until|unless|needs? (?:to|evidence)|cannot (?:verify|establish)|could not|couldn't|not verified|unverified/i.test(t)).map(t=>`${names[side]}: ${t}`);
+    }):[]);
+    if(missing.length)lines.push(bullet('Evidence needed',[...new Set(missing)].join(' ')));
+  } else {
+    const discussed=heading==='Other agreements'?items.flatMap(d=>[lastPosition(d,'a'),lastPosition(d,'b')].flatMap((p,i)=>sentences(p?.rationale??'').filter(t=>/only correction/i.test(t)).map(t=>`${i===0?names.a:names.b}: ${t}`))):[...new Set(items.map(d=>discussion(d,names)).filter(Boolean))];
+    if(discussed.length)lines.push(bullet('Discussion',discussed.join(' ')));
+    if(items.some(d=>d.conclusion==='unresolved')&&last){
+      for(const side of ['a','b'] as const)lines.push(bullet(`${names[side]} now`,compact(lastPosition(d,side)!.rationale)));
+    }
+    const outcome=incomplete?'Unconfirmed — discussion did not complete.':d.stopReason==='agree_to_disagree'?'Both reviewers chose to leave their differing conclusions unresolved.':items.every(d=>d.conclusion==='converged-on-issue')?'Both reviewers support the concern.':items.every(d=>d.conclusion==='converged-on-no-issue')?'Both reviewers concluded no change is needed.':'The reviewers retain differing conclusions.';
+    lines.push(bullet('Final position',outcome));
+    const a=lastPosition(d,'a')?.severity?lastPosition(d,'a'):initial(d,'a'),b=lastPosition(d,'b')?.severity?lastPosition(d,'b'):initial(d,'b');
+    if(d.conclusion==='converged-on-issue'&&severityConflict(a,b))lines.push(bullet('Urgency','Comparable mapped ratings still differ; no shared urgency was recorded.'));
+  }
+  lines.push(...ratings(items,names));
+  const impact=items.flatMap(d=>d.dispute.map(f=>f.impact)).filter((t):t is string=>Boolean(t));
+  if(!impact.length&&heading==='Other agreements'){const p=lastPosition(items.at(-1)!,'a');const consequence=sentences(p?.rationale??'').find(t=>/\b(risks?|causes?|throws?|crashes?|leads? to|results? in)\b/i.test(t));if(consequence)impact.push(consequence);}
+  if(impact.length)lines.push(bullet('Consequence',[...new Set(impact.map(t=>compact(t)))].join(' ')));
+  // Preserve conditions from the finding itself even when the question/title was used for its initial position.
+  const conditions=[...new Set(items.flatMap(d=>d.dispute.map(f=>compact(f.evidence,true))).filter(Boolean))].filter(t=>!lines.some(l=>l.includes(t)));
+  if(conditions.length&&heading!=='Open questions requiring evidence')lines.push(bullet('Evidence limits',conditions.join(' ')));
+  return lines.slice(0,2).filter(Boolean).join('\n\n')+'\n\n'+lines.slice(2).join('\n');
+}
+export const markdownReport=(report:PreprReport):string=>{
+  const names={a:report.reviewers.a===report.reviewers.b?`${report.reviewers.a} (A)`:report.reviewers.a,b:report.reviewers.a===report.reviewers.b?`${report.reviewers.b} (B)`:report.reviewers.b};
+  const sections=['Reviewer differences and where they landed','Open questions requiring evidence','Other agreements'];
+  const groups=displayGroups(report),issues=report.concerns.filter(d=>d.conclusion==='converged-on-issue').length,open=report.concerns.filter(d=>d.conclusion==='unresolved'&&!opposed(d)).length,differences=report.concerns.filter(d=>d.conclusion==='unresolved'&&opposed(d)).length;
+  const incomplete=Boolean(report.failure)||report.preparation.status==='failed'||report.concerns.some(d=>d.stopReason==='incomplete')||[report.initialReviews?.a,report.initialReviews?.b].some(r=>r&&r.status!=='completed');
+  const qualified=Object.values(report.verification).some(v=>v.overview||v.limitations.length);
+  const assessment=!issues&&!open&&!differences?report.concerns.length?'All raised concerns were dismissed; none remain unresolved.':qualified?'No actionable concerns were identified within the reviewed portions.':'No actionable concerns were identified.':`**${issues} supported finding${issues===1?'':'s'} · ${open} open question${open===1?'':'s'}${differences?` · ${differences} unresolved difference${differences===1?'':'s'}`:''}**`;
+  const failure=report.failure,opening=failure?`Review incomplete — ${failure.stage} failed${failure.reviewer?` for ${failure.reviewer}`:''}: ${failure.message} ${failure.recovery}`:incomplete?'Review incomplete. Available concerns remain unconfirmed where discussion did not complete.':assessment;
+  const scope=report.preparation.scope,files=scope?.files??[];
+  const scopeLine=scope?`Scope: ${scope.mode==='local'?'local uncommitted changes':'committed branch changes'}; ${files.length} eligible files${files.length&&files.length<=5?` (${files.map(f=>'`'+f+'`').join(', ')})`:''}${scope.excluded?.length?`; ${scope.excluded.length} tooling/generated files excluded`:''}.`:undefined;
+  const checks=(['a','b'] as const).flatMap(side=>verificationBullets(names[side],report.verification[side]));
+  const coverage=Object.entries(report.verification).flatMap(([side,v])=>sentences(v.overview??'').filter(t=>/partial|only.{0,60}(?:review|inspect)/i.test(t)).map(t=>`${names[side as 'a'|'b']}: ${t}`));
+  const blocker=checks.filter(t=>/working.tree|snapshot.*(?:inaccessible|unverif)|required.*(?:blocked|unavailable)| — .+: (?:failed|blocked)/i.test(t));
+  const content=sections.flatMap(heading=>{const items=groups.filter(g=>section(g)===heading);return items.length?[`## ${heading}`,items.map(g=>entry(g,heading,names,report)).join('\n\n')]:[];});
+  const dismissed=groups.filter(g=>!section(g)).flat().length;
+  return ['# Prepr report',opening,failureClient(failure),`Reviewers: ${report.reviewers.a} (A); ${report.reviewers.b} (B).`,scopeLine,...new Set([...(!issues?coverage:[]),...blocker]),...content,...(checks.length?['## Material review limits',checks.filter(t=>!blocker.includes(t)&&!coverage.some(c=>t.includes(c.split(': ').slice(1).join(': ')))).join('\n')]:[]),...(dismissed?[`${dismissed} dismissed finding${dismissed===1?'':'s'} retained in JSON.`]:[])].filter(Boolean).join('\n\n');
 };
 
-export function incompleteReport(evidence:{scope?:unknown;preparation?:any;initialReviews:{a?:ReviewResult;b?:ReviewResult};missing:string[]}) {
+export function incompleteReport(evidence:{scope?:unknown;preparation?:any;initialReviews:{a?:ReviewResult;b?:ReviewResult};missing:string[];failure?:Failure}) {
   const failures:{stage:string;side?:string;launcher?:string;model?:string;evidence:string;recovery:string}[]=[];
-  if(evidence.preparation?.status==='failed')failures.push({stage:evidence.preparation.stage||'static validation',evidence:evidence.preparation.error||'Static validation failed.',recovery:evidence.preparation.recovery||'Run prepr-setup to inspect configuration.'});
+  if(evidence.failure)failures.push({stage:evidence.failure.stage,side:evidence.failure.side,launcher:evidence.failure.launcher,model:evidence.failure.model,evidence:`${evidence.failure.reviewer??''} ${evidence.failure.message}`.trim(),recovery:evidence.failure.recovery});
+  if(!failures.length&&evidence.preparation?.status==='failed')failures.push({stage:evidence.preparation.stage||'static validation',evidence:evidence.preparation.error||'Static validation failed.',recovery:evidence.preparation.recovery||'Run prepr-setup to inspect configuration.'});
   for(const side of ['a','b'] as const) {
     const result=evidence.initialReviews[side];
-    if(result&&result.status!=='completed')failures.push({stage:'initial review',side,launcher:result.runtime?.launcher,model:result.runtime?.model,evidence:result.stderr||result.stdout||`Reviewer execution ${result.status}; no diagnostic supplied.`,recovery:'Check the selected launcher login and model configuration, required resource access, or slow startup hooks/plugins; rerun after resolving the failure. No account, model or permissions were changed.'});
+    if(!failures.length&&result&&result.status!=='completed')failures.push({stage:'initial review',side,launcher:result.runtime?.launcher,model:result.runtime?.model,evidence:result.failure?.message||result.stderr||result.stdout||`Reviewer execution ${result.status}; no diagnostic supplied.`,recovery:'Check the selected launcher login and model configuration, required resource access, or slow startup hooks/plugins; rerun after resolving the failure. No account, model or permissions were changed.'});
   }
   if(!failures.length)failures.push({stage:'before comparison',evidence:'No usable completed comparison is available; the cause is unknown.',recovery:'Inspect the upstream Archon node errors and rerun after resolving the failure.'});
-  return {status:'incomplete' as const,failures,initialReviews:evidence.initialReviews,preparation:{...evidence.preparation,scope:evidence.scope},verification:{a:verification(evidence.initialReviews.a),b:verification(evidence.initialReviews.b)},limitations:evidence.missing,findingsAvailable:false};
+  return {status:'incomplete' as const,failure:evidence.failure,failures,initialReviews:evidence.initialReviews,preparation:{...evidence.preparation,scope:evidence.scope},verification:{a:verification(evidence.initialReviews.a),b:verification(evidence.initialReviews.b)},limitations:evidence.missing,findingsAvailable:false};
 }
 export function incompleteMarkdown(report:ReturnType<typeof incompleteReport>) {
   const started=report.preparation.initialReviewsStarted===false?'Neither initial review started.':'Available reviewer results are retained; two completed reviews have not been established.';
   const failures=report.failures.map(f=>`- **${f.side?`Reviewer ${f.side.toUpperCase()} — `:''}${f.stage}${f.launcher?` (${f.launcher}, ${f.model})`:''}:** ${f.evidence}\n  Recovery: ${f.recovery}`);
-  const checks=(['a','b'] as const).flatMap(side=>verificationBullets(side.toUpperCase(),report.verification[side]));
-  return ['# Prepr report','Review incomplete. '+started,'**Verification and limitations**',...failures,...checks,...report.limitations.map(l=>`- ${l}`),report.preparation.confirmation?'Launcher/model confirmation was user attestation; it does not prove current authentication or resource access.':'Prerequisite confirmation evidence unavailable or incomplete.','No completed comparison is available; no shared review conclusion or successful empty review is claimed.'].join('\n\n');
+  const checks=(['a','b'] as const).flatMap(side=>verificationBullets(report.initialReviews[side]?.reviewer||side.toUpperCase(),report.verification[side]));
+  const names=(['a','b'] as const).map(side=>{const name=report.initialReviews[side]?.reviewer||report.preparation.reviewers?.[side]?.name;return name?`${name} (${side.toUpperCase()})`:undefined;}).filter(Boolean);
+  const scope=report.preparation.scope;
+  const scopeLine=scope?`Scope: ${scope.mode==='local'?'uncommitted project changes':'committed branch changes'}; ${scope.files?.length??0} eligible files${scope.excluded?.length?`; ${scope.excluded.length} tooling/generated files excluded`:''}.`:undefined;
+  return ['# Prepr report','Review incomplete. '+started,...(names.length?[`Reviewers: ${names.join('; ')}.`]:[]),...(scopeLine?[scopeLine]:[]),'## Material review limits',...failures,failureClient(report.failure),...checks,...(!report.failures.length?report.limitations.map(l=>`- ${l}`):[]),'No completed comparison is available; no shared review conclusion or successful empty review is claimed.'].filter(Boolean).join('\n\n');
 }

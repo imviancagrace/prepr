@@ -21,11 +21,11 @@ test("unverified upstream debate conclusions cannot become bugs", () => {
 test("initial agreements have short titles, labeled bullets, source and impact", () => {
   const data = report([[finding("reviewer-a", "issue"), finding("reviewer-b", "issue")]]);
   const text = markdownReport(data);
-  expect(text).toContain("## Agreements");
+  expect(text).toContain("## Other agreements");
   expect(text).toContain("### Missing request guard");
-  expect(text).toContain("- **Concern:**");
-  expect(text).toContain("- **Reviewers' reasoning:** Both reviewers: Anonymous requests");
-  expect(text).toContain("- **Why it matters:** Anonymous requests return a server error.");
+  expect(text).toContain("- **Final position:**");
+  expect(text).toContain("- **Correctness initially:** Anonymous requests");
+  expect(text).toContain("- **Consequence:** Anonymous requests return a server error.");
   expect(text).toContain("`a.ts:12`");
   expect(text).not.toContain("Stop reason");
   expect(text).not.toContain("converged-on");
@@ -35,47 +35,48 @@ test("a resolved disagreement retains both initial reasons and what changed once
   const debate: Debate = { dispute: [a, b], rounds: [round(position("issue", "The endpoint bypasses middleware."), position("issue", "I confirmed that this route bypasses middleware."))], stopReason: "agreement", conclusion: "converged-on-issue" };
   const data = report([], [debate]);
   const text = markdownReport(data);
-  expect(text).toContain("## Disagreements");
-  expect(text).toContain("**Review conclusion:**");
+  expect(text).toContain("## Reviewer differences and where they landed");
+  expect(text).toContain("**Final position:**");
   expect(text).not.toContain("**Outcome:**");
   expect(text).not.toContain("**What changed:**");
-  expect(text).not.toContain("## Agreements");
-  expect(text).toContain("A's reasoning");
+  expect(text).not.toContain("## Other agreements");
+  expect(text).toContain("Correctness initially");
   expect(text).toContain("middleware guards anonymous");
-  expect(text).toContain("Why the conclusion changed:** Reviewer B: I confirmed");
+  expect(text).toContain("Discussion:** Security: I confirmed");
   expect(text.match(/### Missing request guard/g)).toHaveLength(1);
   expect(data.debates[0].rounds[0].reviewerA.stdout).toBe("original A response");
 });
 test("unresolved debate identifies the human decision and incomplete evidence", () => {
   const data = report([], [{ dispute: [finding("reviewer-a", "issue")], rounds: [], stopReason: "incomplete", conclusion: "unresolved" }]);
   const text = markdownReport(data);
-  expect(text).toContain("B's reasoning:** Did not raise this concern");
-  expect(text).toContain("What you need to decide");
-  expect(text).toContain("evidence is incomplete");
+  expect(text).not.toContain("Security\'s reasoning:** Did not raise this concern");
+  expect(text).not.toContain("What you need to decide");
+  expect(text).toContain("discussion did not complete");
   expect(text).not.toContain("B disagreed");
 });
-test("a sole-reviewer concern accepted without opposition appears once as agreement", () => {
+test("a sole-reviewer concern accepted without opposition remains visible as a contribution", () => {
   const data = report([], [{ dispute: [finding("reviewer-a", "issue")], rounds: [round(position("issue", "Anonymous requests crash."), position("issue", "The endpoint bypasses the guard."))], stopReason: "agreement", conclusion: "converged-on-issue" }]);
   expect(data.uncontestedFindings).toHaveLength(1);
   expect(data.confirmedBugs).toHaveLength(1);
   const text = markdownReport(data);
-  expect(text).toContain("## Agreements");
-  expect(text).not.toContain("## Disagreements");
+  expect(text).toContain("## Reviewer differences and where they landed");
+  expect(text).not.toContain("## Other agreements");
   expect(text.match(/### Missing request guard/g)).toHaveLength(1);
 });
 test("opposition within debate stays visible even when only one reviewer raised it", () => {
   const data = report([], [{ dispute: [finding("reviewer-a", "issue")], rounds: [round(position("issue", "The route bypasses the guard."), position("no_issue", "Middleware appears to guard it.")), round(position("no_issue", "The route is protected after all."), position("no_issue", "The guard applies."), 2)], stopReason: "agreement", conclusion: "converged-on-no-issue" }]);
   const text = markdownReport(data);
-  expect(text).toContain("## Disagreements");
-  expect(text).toContain("Did not raise this concern in the initial review.");
-  expect(text).toContain("Why the conclusion changed:** Reviewer A: The route is protected after all.");
+  expect(text).toContain("## Reviewer differences and where they landed");
+  expect(text).not.toContain("Did not raise this concern in the initial review.");
+  expect(text).toContain("Discussion:** Correctness: The route is protected after all.");
   expect(data.debates[0].rounds).toHaveLength(2);
 });
 test("meaningful dismissals appear briefly without empty sections", () => {
   const text = markdownReport(report([[finding("reviewer-a", "no_issue"), finding("reviewer-b", "no_issue")]]));
-  expect(text).toContain("## Withdrawn concerns");
-  expect(text).not.toContain("## Agreements");
-  expect(text).not.toContain("## Disagreements");
+  expect(text).toContain("1 dismissed finding retained in JSON.");
+  expect(text).not.toContain("## Withdrawn concerns");
+  expect(text).not.toContain("## Other agreements");
+  expect(text).not.toContain("## Reviewer differences and where they landed");
 });
 test("same-skill clean prose yields only a concise assessment and preserves raw evidence", async () => {
   const text = "Vee questions:\nNone.\nVee verdict: Ready.\nDefault review:\nNo findings.";
@@ -96,22 +97,22 @@ test("agreement on an issue does not erase different initial severity ratings", 
   const a = { ...finding("reviewer-a", "issue"), severity: "high", severityLevel: "high" }, b = { ...finding("reviewer-b", "issue"), severity: "low", severityLevel: "low" };
   const data = report([], [{ dispute: [a, b], rounds: [round(position("issue", "The route is unguarded."), position("issue", "The route is unguarded."))], stopReason: "agreement", conclusion: "converged-on-issue" }]);
   const text = markdownReport(data);
-  expect(text).toContain("Initially rated high severity.");
-  expect(text).toContain("What you need to decide:** Decide how urgently to address this issue");
-  expect(text).toContain("No shared severity rating was recorded");
+  expect(text).toContain("Correctness's rating:** high");
+  expect(text).toContain("Security's rating:** low");
+  expect(text).toContain("no shared urgency was recorded");
 });
 test("dismissed concerns have an attributed explanation and no severity decision", () => {
   const a = { ...finding("reviewer-a", "issue"), severity: "high", severityLevel: "high" };
   const b = { ...finding("reviewer-b", "no_issue"), severity: "low", severityLevel: "low" };
   const data = report([], [{ dispute: [a, b], rounds: [round(position("no_issue", "I verified that the existing guard covers this route."), position("no_issue", "The router guard is sufficient."))], stopReason: "agreement", conclusion: "converged-on-no-issue" }]);
   const text = markdownReport(data);
-  expect(text).toContain("Why the conclusion changed:** Reviewer A: I verified");
+  expect(text).toContain("Discussion:** Correctness: I verified");
   expect(text).not.toContain("What you need to decide");
   expect(text).not.toContain("Remaining decision");
 });
 test("the resolution attributes the final change rather than an earlier reversal", () => {
   const data = report([], [{ dispute: [finding("reviewer-a", "issue"), finding("reviewer-b", "no_issue")], rounds: [round(position("no_issue", "I thought the guard applied."), position("issue", "I found this route bypasses the guard.")), round(position("issue", "I verified this route is unprotected."), position("issue", "The route bypasses the guard."), 2)], stopReason: "agreement", conclusion: "converged-on-issue" }]);
-  expect(markdownReport(data)).toContain("Why the conclusion changed:** Reviewer A: I verified this route is unprotected.");
+  expect(markdownReport(data)).toContain("Discussion:** Correctness: I verified this route is unprotected.");
 });
 
 test("both original reviewers can confirm duplicate concerns without losing either debate", () => {
@@ -125,7 +126,7 @@ test("both original reviewers can confirm duplicate concerns without losing eith
   expect(data.concerns[0].dispute.map(f => f.id)).toEqual([a.id, b.id]);
   expect(data.concerns[0].rounds).toHaveLength(2);
   expect(data.debates).toHaveLength(2);
-  expect(markdownReport(data)).toContain("1 concern supported by both reviewers");
+  expect(markdownReport(data)).toContain("1 supported finding");
   expect(markdownReport(data).match(/^### /gm)).toHaveLength(1);
   for (const other of [
     make(b, [], []),
@@ -154,8 +155,13 @@ test("report opening preserves check status, attribution, snapshot and condition
  const data=buildReport(comparison,[]),text=markdownReport(data);
  expect(data.verification.a.checks[0]).toMatchObject({status:'not run',reviewer:'Vee',snapshot:'abc'});
  expect(data.verification.b.checks[0].status).toBe('unknown');
- expect(text.indexOf('Verification and limitations')).toBeLessThan(text.indexOf('## Agreements'));
+ expect(text.indexOf('## Material review limits')).toBeGreaterThan(text.indexOf('## Other agreements'));
  expect(text).toContain('duplicate-date records exist in current data.');
  expect(text).toContain('Duplicate-date data remains unverified.');
  expect(text).not.toContain('Tests: passed');
+});
+
+test('duplicate display names retain distinct A/B reasoning without changing stable reviewer ids',()=>{
+ const data=buildReport({reviewers:{a:'Reviewer',b:'Reviewer'},agreements:[],findings:[]},[{dispute:[finding('reviewer-a','issue'),finding('reviewer-b','no_issue')],rounds:[],stopReason:'max_rounds',conclusion:'unresolved'}]);
+ const md=markdownReport(data);expect(md).toContain('Reviewer (A); Reviewer (B)');expect(md).toContain("Reviewer (A) initially");expect(md).toContain("Reviewer (B) initially");expect(md).not.toContain('(A) (A)');expect(data.concerns[0].dispute[0].reviewer).toBe('reviewer-a');
 });

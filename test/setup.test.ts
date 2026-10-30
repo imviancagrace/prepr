@@ -18,6 +18,7 @@ function fixture() {
   git(['add','.'],source);git(['-c','user.name=Test','-c','user.email=test@example.test','commit','-m','fixture'],source);git(['remote','add','origin',REMOTE],source);
   const exec:Run=(args,cwd)=>{
     log.push(args);
+    if(args[0]==='which')return '/fixture/bin/'+args[1];
     if(args[0]==='git') {
       if(args[1]==='clone' && args.includes(REMOTE)) { git(['clone','--quiet','--branch','main',source,args.at(-1)!]); git(['remote','set-url','origin',REMOTE],args.at(-1)); return ''; }
       return git(args.slice(1),cwd);
@@ -103,7 +104,7 @@ test('main is refreshed, other branch ignored, denied fetch never uses cache',()
 },15000);
 test('inspection and exact approved installations preserve tools and never start sessions',()=>{
  const seen:string[][]=[];const installed=new Set(['git','bun','codex']);
- const exec:Run=args=>{seen.push(args);if(args[0]==='installer'){installed.add(args[1]);return '';}if(!installed.has(args[0]))throw new Error('missing');return args[0]==='archon'?'0.11.1':'1.3.14';};
+ const exec:Run=args=>{seen.push(args);if(args[0]==='which')return '/fixture/bin/'+args[1];if(args[0]==='installer'){installed.add(args[1]);return '';}if(!installed.has(args[0]))throw new Error('missing');return args[0]==='archon'?'0.11.1':'1.3.14';};
  const tools=inspectTools(['codex','codex'],exec);expect(tools.filter(t=>t.status!=='present').map(t=>t.tool)).toEqual(['archon']);expect(seen.some(a=>a[0]==='claude')).toBe(false);
  const steps=[{tool:'archon',command:['installer','archon']}];expect(()=>installApproved(steps,[],exec)).toThrow('not approved');expect(installed.has('archon')).toBe(false);
  installApproved(steps,steps,exec);expect(inspectTools(['codex'],exec).every(t=>t.status==='present')).toBe(true);
@@ -190,3 +191,18 @@ test('prerequisite preview and explicit confirmation are separate from reviewer 
   expect(f.log.some(a=>a.includes('serve')||a.includes('-p')||a.includes('exec')||a.includes('workflow'))).toBe(false);
  }finally{f.cleanup();}
 },20000);
+
+test('local workflow exclusion preserves tracked/unrelated files, remaining dirty content and terminal-safe PATH',async()=>{
+ const {terminalHandoff}=await import('../skills/prepr-setup/scripts/setup.ts');
+ const f=fixture();try{
+  writeFileSync(join(f.project,'.git/info/exclude'),'# existing rule\nlocal-only.txt\n');
+  writeFileSync(join(f.project,'app.ts'),'user work');
+  const result=await apply(f.request(),f.exec);
+  const exclude=readFileSync(join(f.project,'.git/info/exclude'),'utf8');expect(exclude).toContain('local-only.txt');expect(exclude).toContain('/.archon/workflows/prepr/');expect(exclude).not.toContain('/.archon/\n');expect(result.handoff.remainingChanges).toContain('app.ts');
+  expect(f.git(['check-ignore','.archon/workflows/prepr/review-debate/review-debate.yaml'],f.project)).toBeTruthy();
+  const file='.archon/workflows/prepr/review-debate/review-debate.yaml';f.git(['add','-f',file],f.project);await apply({...f.request(),config:'keep'},f.exec);expect(f.git(['ls-files','--',file],f.project)).toBe(file);
+  const handoff=terminalHandoff([{tool:'archon',status:'present',path:"/tmp/tools' $(nope)/archon"} as any],f.project,f.exec);
+  expect(handoff.pathCommand).toContain("'\\''");expect(handoff.pathCommand).toEndWith(':"$PATH"');expect(handoff.verifyCommand).toBe('archon --version');
+  const shell=Bun.spawnSync(['/bin/sh','-c',handoff.pathCommand+'\nprintf %s "$PATH"'],{env:{PATH:'/usr/bin'}});expect(shell.exitCode).toBe(0);expect(shell.stdout.toString()).toBe("/tmp/tools' $(nope):/usr/bin");
+ }finally{f.cleanup();}
+},15000);

@@ -1,0 +1,21 @@
+{
+  "findings": [
+    {"id":"reviewer-a-1","reviewer":"reviewer-a","summary":"Was the generated archive intended?","question":"Was this archive intentionally included?","file":".ux-runs.zip","evidence":"A generated archive is present even though the underlying run directory is ignored.","verdict":"issue"},
+    {"id":"reviewer-a-2","reviewer":"reviewer-a","summary":"Can the repeated setup notes be condensed?","question":"Can these entries be condensed to the current setup?","file":"docs/progress.md","line":3,"evidence":"Repeated setup entries obscure which configuration is current.","kind":"question"},
+    {"id":"reviewer-b-1","reviewer":"reviewer-b","summary":"The untracked archive lacks an ignore rule.","question":"Was this zip intentional or leftover?","file":".ux-runs.zip","evidence":"A broad git add would include the generated archive.","verdict":"issue","severity":"Should fix"},
+    {"id":"reviewer-b-2","reviewer":"reviewer-b","summary":"Screenshots may contain real data.","question":"Did the runs use real data or test data?","file":".ux-runs.zip","evidence":"Image contents were not verified.","kind":"hypothesis"},
+    {"id":"reviewer-b-3","reviewer":"reviewer-b","summary":"The archive contains macOS metadata and uses a retired naming scheme.","file":".ux-runs.zip","evidence":"Finder metadata was observed. The naming criticism needs checking.","verdict":"issue","severity":"Nit"},
+    {"id":"reviewer-b-4","reviewer":"reviewer-b","summary":"The progress note is accurate; no problems found.","file":"docs/progress.md","line":3,"evidence":"The note describes the observed setup accurately.","verdict":"no_issue"}
+  ],
+  "rounds": {
+    "reviewer-a-1": [{"a":{"stance":"maintain","verdict":"issue","rationale":"The archive adds generated evidence to the project."},"b":{"stance":"accept","verdict":"issue","rationale":"I agree, and this is the same concern as my first finding. It risks being committed accidentally."}}],
+    "reviewer-a-2": [
+      {"a":{"stance":"maintain","rationale":"This remains a question about repeated notes."},"b":{"stance":"accept","verdict":"issue","severity":"Nit","rationale":"The repeated notes make the current configuration harder to recover."}},
+      {"a":{"stance":"revise","verdict":"issue","rationale":"Travis identified the consequence: future readers must distinguish superseded settings. That changes the assessment from a question to an issue."},"b":{"stance":"maintain","verdict":"issue","severity":"Nit","rationale":"The repeated notes still obscure the current setup."}}
+    ],
+    "reviewer-b-1": [{"a":{"stance":"revise","verdict":"issue","rationale":"The archive lacks ignore coverage. Its inclusion risks an accidental commit. The only correction is size: about 12.7 MB, not 9 MB."},"b":{"stance":"revise","verdict":"issue","severity":"Should fix","rationale":"The size correction is right. Ignore coverage is still missing."}}],
+    "reviewer-b-2": [{"a":{"stance":"accept","rationale":"This remains a hypothesis until the images are inspected or test-only data is confirmed."},"b":{"stance":"maintain","rationale":"The issue verdict remains unknown until the screenshots are checked."}}],
+    "reviewer-b-3": [{"a":{"stance":"revise","verdict":"issue","rationale":"The archive contains unnecessary macOS metadata. Historical names are not independently defective unless the archive claims to follow the current naming scheme."},"b":{"stance":"revise","verdict":"issue","severity":"Nit","rationale":"I accept the correction. Old names only matter if the archive claims to follow the new scheme. I am dropping that half of the finding. The metadata concern still holds."}}],
+    "reviewer-b-4": [{"a":{"stance":"revise","verdict":"no_issue","rationale":"The note is accurate; repetition is a separate concern."},"b":{"stance":"revise","verdict":"no_issue","rationale":"I accept narrowing this assessment to accuracy."}}]
+  }
+}

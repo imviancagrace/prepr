@@ -1,5 +1,6 @@
 fixture:
-  expect: cancelled
+  expect: completed
+  reached: [report, verify-run]
   inputs:
     reviewer_a: "fixture-a"
     reviewer_b: "fixture-b"
@@ -41,7 +42,15 @@ initial-reviewer-b:
   exitCode: 0
   sessionId: "00000000-0000-0000-0000-000000000002"
 comparison:
-  ready: false
+  ready: true
+  hasDisputes: false
   agreements: []
   disputes: []
   findings: []
+  disputeIds: []
+report:
+  report: {type: archon_artifact, run_id: fixture, path: prepr-report.md}
+  data: {type: archon_artifact, run_id: fixture, path: prepr-report.json}
+verify-run:
+  report: {type: archon_artifact, run_id: fixture, path: prepr-report.md}
+  data: {type: archon_artifact, run_id: fixture, path: prepr-report.json}

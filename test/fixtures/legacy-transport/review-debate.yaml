@@ -1,0 +1,152 @@
+name: prepr
+description: Run two selected reviewer skills through independent agents, debate disagreements, and report their attributed conclusions.
+inputs:
+  base:
+    default: ""
+    description: Optional comparison ref or commit for branch scope only.
+  preview_only:
+    default: "false"
+    description: Display scope and stop before reviewer selection or model probes.
+  scope:
+    default: "local"
+    description: local reviews uncommitted changes; branch reviews clean local HEAD since its merge base with the verified origin default branch.
+  reviewer_a:
+    default: ""
+    description: Optional local reviewer profile name or direct skill reference for side A.
+  reviewer_b:
+    default: ""
+    description: Optional local reviewer profile name or direct skill reference for side B.
+  reviewer_a_launcher:
+    default: ""
+    description: Required launcher (codex or claude) when reviewer_a is a direct skill reference.
+  reviewer_b_launcher:
+    default: ""
+    description: Required launcher (codex or claude) when reviewer_b is a direct skill reference.
+  reviewer_a_model:
+    default: ""
+    description: Optional model pin when reviewer_a is a direct skill reference.
+  reviewer_b_model:
+    default: ""
+    description: Optional model pin when reviewer_b is a direct skill reference.
+returns: report
+mutates_checkout: false
+nodes:
+  - id: select-reviewers
+    script: select-reviewers
+    runtime: bun
+    depends_on: [capture-diff]
+    when: "$capture-diff.output.previewOnly != true"
+    timeout: 180000
+    with:
+      reviewer_a: "$INPUTS.reviewer_a"
+      reviewer_b: "$INPUTS.reviewer_b"
+      reviewer_a_launcher: "$INPUTS.reviewer_a_launcher"
+      reviewer_b_launcher: "$INPUTS.reviewer_b_launcher"
+      reviewer_a_model: "$INPUTS.reviewer_a_model"
+      reviewer_b_model: "$INPUTS.reviewer_b_model"
+
+  - id: capture-diff
+    script: capture-diff
+    runtime: bun
+    timeout: 120000
+    with:
+      scope: "$INPUTS.scope"
+      base: "$INPUTS.base"
+      preview_only: "$INPUTS.preview_only"
+
+  - id: initial-reviewer-a
+    script: run-initial
+    runtime: bun
+    timeout: 600000
+    depends_on: [capture-diff, select-reviewers]
+    with:
+      reviewer: "$select-reviewers.output.reviewerA"
+      scope: "$capture-diff.output.scope"
+      preparation_path: "$select-reviewers.output.preparationPath"
+      reviewer_side: "a"
+
+  - id: initial-reviewer-b
+    script: run-initial
+    runtime: bun
+    timeout: 600000
+    depends_on: [capture-diff, select-reviewers]
+    with:
+      reviewer: "$select-reviewers.output.reviewerB"
+      scope: "$capture-diff.output.scope"
+      preparation_path: "$select-reviewers.output.preparationPath"
+      reviewer_side: "b"
+
+  - id: comparison
+    script: compare
+    runtime: bun
+    depends_on: [initial-reviewer-a, initial-reviewer-b]
+    with:
+      review_a: "$initial-reviewer-a.output"
+      review_b: "$initial-reviewer-b.output"
+    output_format:
+      type: object
+      properties:
+        ready: { type: boolean }
+        findings:
+          type: array
+          items: {type: object, additionalProperties: true}
+        disputes:
+          type: array
+          items:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+      required: [ready]
+
+  - id: reviewer-start-failed
+    cancel: "A reviewer agent did not complete; inspect the initial reviewer nodes."
+    depends_on: [comparison]
+    when: "$comparison.output.ready != true"
+
+  - id: debates
+    include: prepr-debate-reviewer
+    depends_on: [comparison]
+    when: "$comparison.output.ready == true"
+    with:
+      reviewer_a: "$select-reviewers.output.reviewerA"
+      reviewer_b: "$select-reviewers.output.reviewerB"
+      review_a: "$initial-reviewer-a.output"
+      review_b: "$initial-reviewer-b.output"
+      findings: "$comparison.output.findings"
+      cache_path: "$capture-diff.output.debateCachePath"
+      run_id: "$capture-diff.output.runId"
+    fan_out:
+      items: "$comparison.output.disputes"
+      as: dispute
+      max_parallel: 1
+      join: all_done
+
+  - id: report
+    script: report
+    runtime: bun
+    depends_on: [capture-diff, comparison, debates]
+    trigger_rule: all_done
+    output_format:
+      type: object
+      properties:
+        preview:
+          type: object
+          additionalProperties: true
+        report:
+          type: object
+          properties:
+            type: { const: archon_artifact }
+            run_id: { type: string }
+            path: { const: prepr-report.md }
+          required: [type, run_id, path]
+        data:
+          type: object
+          properties:
+            type: { const: archon_artifact }
+            run_id: { type: string }
+            path: { const: prepr-report.json }
+          required: [type, run_id, path]
+      anyOf:
+        - required: [report, data]
+        - required: [preview]

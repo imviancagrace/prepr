@@ -38,6 +38,7 @@ nodes:
     when: "$capture-diff.output.previewOnly != true"
     timeout: 180000
     with:
+      evidence_only: "true"
       reviewer_a: "$INPUTS.reviewer_a"
       reviewer_b: "$INPUTS.reviewer_b"
       reviewer_a_launcher: "$INPUTS.reviewer_a_launcher"
@@ -57,23 +58,19 @@ nodes:
   - id: initial-reviewer-a
     script: run-initial
     runtime: bun
-    timeout: 600000
+    timeout: 615000
     depends_on: [capture-diff, select-reviewers]
     with:
-      reviewer: "$select-reviewers.output.reviewerA"
-      scope: "$capture-diff.output.scope"
-      preparation_path: "$select-reviewers.output.preparationPath"
+      evidence_only: "true"
       reviewer_side: "a"
 
   - id: initial-reviewer-b
     script: run-initial
     runtime: bun
-    timeout: 600000
+    timeout: 615000
     depends_on: [capture-diff, select-reviewers]
     with:
-      reviewer: "$select-reviewers.output.reviewerB"
-      scope: "$capture-diff.output.scope"
-      preparation_path: "$select-reviewers.output.preparationPath"
+      evidence_only: "true"
       reviewer_side: "b"
 
   - id: comparison
@@ -81,44 +78,15 @@ nodes:
     runtime: bun
     depends_on: [initial-reviewer-a, initial-reviewer-b]
     with:
-      review_a: "$initial-reviewer-a.output"
-      review_b: "$initial-reviewer-b.output"
-    output_format:
-      type: object
-      properties:
-        ready: { type: boolean }
-        findings:
-          type: array
-          items: {type: object, additionalProperties: true}
-        disputes:
-          type: array
-          items:
-            type: array
-            items:
-              type: object
-              additionalProperties: true
-      required: [ready]
-
-  - id: reviewer-start-failed
-    cancel: "A reviewer agent did not complete; inspect the initial reviewer nodes."
-    depends_on: [comparison]
-    when: "$comparison.output.ready != true"
+      evidence_only: "true"
 
   - id: debates
     include: prepr-debate-reviewer
     depends_on: [comparison]
-    when: "$comparison.output.ready == true"
-    with:
-      reviewer_a: "$select-reviewers.output.reviewerA"
-      reviewer_b: "$select-reviewers.output.reviewerB"
-      review_a: "$initial-reviewer-a.output"
-      review_b: "$initial-reviewer-b.output"
-      findings: "$comparison.output.findings"
-      cache_path: "$capture-diff.output.debateCachePath"
-      run_id: "$capture-diff.output.runId"
+    when: "$comparison.output.hasDisputes == true"
     fan_out:
-      items: "$comparison.output.disputes"
-      as: dispute
+      items: "$comparison.output.disputeIds"
+      as: dispute_index
       max_parallel: 1
       join: all_done
 
@@ -150,3 +118,9 @@ nodes:
       anyOf:
         - required: [report, data]
         - required: [preview]
+
+  - id: verify-run
+    script: verify-run
+    runtime: bun
+    depends_on: [report]
+    trigger_rule: all_done
